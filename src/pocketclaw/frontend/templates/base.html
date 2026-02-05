@@ -2,6 +2,10 @@
   PocketPaw Dashboard - Base Template
 
   Changes (2026-02-05):
+  - MAJOR REFACTOR: Componentized JS using mixin pattern
+  - Added feature module scripts: chat, file-browser, reminders, intentions,
+    skills, transparency, remote-access, mission-control
+  - Scripts load order: websocket.js -> tools.js -> features/*.js -> app.js
   - Added "Crew" tab (multi-agent control room) with live indicator badge
   - Added missions.html component include
 
@@ -165,6 +169,16 @@
     <!-- Scripts -->
     <script src="/static/js/websocket.js"></script>
     <script src="/static/js/tools.js"></script>
+    <!-- Feature modules (loaded before app.js) -->
+    <script src="/static/js/features/chat.js"></script>
+    <script src="/static/js/features/file-browser.js"></script>
+    <script src="/static/js/features/reminders.js"></script>
+    <script src="/static/js/features/intentions.js"></script>
+    <script src="/static/js/features/skills.js"></script>
+    <script src="/static/js/features/transparency.js"></script>
+    <script src="/static/js/features/remote-access.js"></script>
+    <script src="/static/js/features/mission-control.js"></script>
+    <!-- Main app (assembles features) -->
     <script src="/static/js/app.js"></script>
 
     <!-- Initialize Lucide icons -->
