@@ -70,7 +70,7 @@
                             <button
                                 class="text-left p-3 rounded-xl border transition-all"
                                 :class="selectedSession === session.id ? 'bg-blue-500/20 border-blue-500/30' : 'bg-black/30 border-[var(--glass-border)] hover:bg-white/5'"
-                                @click="selectSession(session.id)"
+                                @click="selectMemorySession(session.id)"
                             >
                                 <div class="flex items-center justify-between mb-1.5">
                                     <span class="text-[11px] text-white/40 font-mono" x-text="session.id.slice(0, 12) + '...'"></span>

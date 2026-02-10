@@ -18,11 +18,12 @@ Changes:
 """
 
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator, Optional, Any
+from typing import Any
 
-from pocketclaw.config import Settings
 from pocketclaw.agents.protocol import AgentEvent, ExecutorProtocol
+from pocketclaw.config import Settings
 from pocketclaw.tools.policy import ToolPolicy
 
 logger = logging.getLogger(__name__)
@@ -48,33 +49,116 @@ DANGEROUS_PATTERNS = [
     "wget | bash",
 ]
 
-# PocketPaw system prompt for Claude Agent SDK
-SYSTEM_PROMPT = """You are PocketPaw, a helpful AI assistant running locally on the user's computer.
+# Default identity fallback (used when AgentContextBuilder prompt is not available)
+_DEFAULT_IDENTITY = (
+    "You are PocketPaw, a helpful AI assistant running locally on the user's computer."
+)
 
-You have powerful tools at your disposal:
+# Tool-specific instructions — appended to every system prompt regardless of source
+_TOOL_INSTRUCTIONS = """
+## Built-in SDK Tools
 - Bash: Run shell commands
 - Read/Write/Edit: File operations
 - Glob/Grep: Search files and content
-- WebSearch: Search the web for information
-- WebFetch: Fetch content from URLs
+- WebSearch/WebFetch: Search the web and fetch URLs
+
+## PocketPaw Tools (call via Bash)
+
+You have extra tools installed. Call them with:
+```bash
+python -m pocketclaw.tools.cli <tool_name> '<json_args>'
+```
+
+### Memory
+- `remember '{"content": "User name is Alice", "tags": ["personal"]}'` — save to long-term memory
+- `forget '{"query": "old preference"}'` — remove outdated memories
+
+**When to use remember:**
+- User tells you their name, preferences, or personal details
+- User explicitly asks "remember this"
+- You learn something important about the user's projects or workflow
+
+**Always remember proactively** — don't wait to be asked.
+If someone shares personal info, immediately call remember.
+
+**Reading memories:** Your system prompt already contains a "Memory
+Context" section with ALL saved memories pre-loaded. Just read it
+directly — never use a tool to look up what you already know.
+
+### Email (Gmail — requires OAuth)
+- `gmail_search '{"query": "is:unread", "max_results": 10}'` — search emails
+- `gmail_read '{"message_id": "MSG_ID"}'` — read full email
+- `gmail_send '{"to": "x@y.com", "subject": "Hi", "body": "..."}'` — send email
+- `gmail_list_labels '{}'` — list all labels
+- `gmail_create_label '{"name": "MyLabel"}'` — create label (use / for nesting)
+- `gmail_modify '{"message_id": "ID", "add_labels": ["LABEL"], "remove_labels": ["INBOX"]}'`
+- `gmail_trash '{"message_id": "ID"}'` — trash a message
+- `gmail_batch_modify '{"message_ids": ["ID1","ID2"], "add_labels": ["L1"]}'`
+  Built-in label IDs: INBOX, SPAM, TRASH, UNREAD, STARRED, IMPORTANT
+
+### Calendar (Google Calendar — requires OAuth)
+- `calendar_list '{"max_results": 10}'` — list upcoming events
+- `calendar_create '{"summary": "Meeting", "start": "2026-02-08T10:00:00", "end": "2026-02-08T11:00:00"}'`
+- `calendar_prep '{"hours_ahead": 24}'` — prep summary for upcoming meetings
+
+### Voice / TTS
+- `text_to_speech '{"text": "Hello world", "voice": "alloy"}'` — generate speech audio
+  Voices (OpenAI): alloy, echo, fable, onyx, nova, shimmer
+- `speech_to_text '{"audio_file": "/path/to/audio.mp3"}'` — transcribe audio to text
+  Optional: `"language": "en"` (auto-detected if omitted). Supports mp3/wav/m4a/webm.
+
+### Research
+- `research '{"topic": "quantum computing", "depth": "standard"}'` — multi-source research
+  Depths: quick (3 sources), standard (5), deep (10)
+
+### Image Generation
+- `image_generate '{"prompt": "a sunset over mountains", "aspect_ratio": "16:9"}'`
+
+### Web Content
+- `web_search '{"query": "latest news on AI"}'` — web search (Tavily/Brave)
+- `url_extract '{"urls": ["https://example.com"]}'` — extract clean text from URLs
+
+### Skills
+- `create_skill '{"skill_name": "my-skill", "description": "...", "prompt_template": "..."}'`
+
+### Google Drive (requires OAuth)
+- `drive_list '{"query": "name contains \\'report\\'"}'` — list/search files
+- `drive_download '{"file_id": "FILE_ID"}'` — download a file
+- `drive_upload '{"file_path": "/path/to/file.pdf", "folder_id": "FOLDER_ID"}'` — upload file
+- `drive_share '{"file_id": "FILE_ID", "email": "user@example.com", "role": "reader"}'` — share
+
+### Google Docs (requires OAuth)
+- `docs_read '{"document_id": "DOC_ID"}'` — read document as plain text
+- `docs_create '{"title": "My Doc", "content": "Hello world"}'` — create a new document
+- `docs_search '{"query": "meeting notes"}'` — search Google Docs by name
+
+### Spotify (requires OAuth)
+- `spotify_search '{"query": "bohemian rhapsody", "type": "track"}'` — search tracks/albums/artists
+- `spotify_now_playing '{}'` — what's currently playing
+- `spotify_playback '{"action": "play"}'` — play/pause/next/prev/volume (actions: play, pause, next, prev, volume)
+- `spotify_playlist '{"action": "list"}'` — list playlists or add track
+
+### OCR
+- `ocr '{"image_path": "/path/to/image.png"}'` — extract text from image (uses GPT-4o vision)
+
+### Reddit
+- `reddit_search '{"query": "best python frameworks", "subreddit": "python"}'` — search Reddit
+- `reddit_read '{"url": "https://reddit.com/r/python/comments/..."}'` — read post + comments
+- `reddit_trending '{"subreddit": "all", "limit": 10}'` — trending posts
+
+### Delegation
+- `delegate_claude_code '{"task": "refactor the auth module", "timeout": 300}'` — delegate to Claude Code CLI
 
 ## Guidelines
 
-1. **Be AGENTIC** - Don't just describe what to do, actually DO it using your tools.
-2. **Query actual data** - When asked about calendar, emails, etc., use Bash with AppleScript/Python to QUERY the data.
-3. **Be concise** - Give clear, helpful responses.
-4. **Be safe** - Don't run destructive commands. Ask for confirmation if unsure.
-
-## Examples of AGENTIC behavior
-
-| User Says | You Should Do |
-|-----------|---------------|
-| "What's on my calendar today?" | Use Bash with AppleScript to query Calendar.app and return actual events |
-| "Find files with TODO" | Use Grep to search and return matching files |
-| "What's the weather?" | Use WebSearch to find current weather |
-| "Download that PDF" | Use WebFetch or Bash with curl |
-
-Always execute tasks and return results, don't just explain how to do them.
+1. **Be AGENTIC** — execute tasks using tools, don't just describe how.
+2. **Use PocketPaw tools** — always prefer `python -m pocketclaw.tools.cli` over platform-specific commands (AppleScript, PowerShell, etc.). These tools work on all operating systems.
+3. **Be concise** — give clear, helpful responses.
+4. **Be safe** — don't run destructive commands. Ask for confirmation if unsure.
+5. If Gmail/Calendar/Drive/Docs returns "not authenticated", tell the user to visit:
+   http://localhost:8888/api/oauth/authorize?service=google_gmail (or google_calendar, google_drive, google_docs)
+6. If Spotify returns "not authenticated", tell the user to visit:
+   http://localhost:8888/api/oauth/authorize?service=spotify
 """
 
 
@@ -102,7 +186,7 @@ class ClaudeAgentSDK:
         "WebFetch": "browser",
     }
 
-    def __init__(self, settings: Settings, executor: Optional[ExecutorProtocol] = None):
+    def __init__(self, settings: Settings, executor: ExecutorProtocol | None = None):
         self.settings = settings
         self._executor = executor  # Optional - SDK has built-in execution
         self._stop_flag = False
@@ -125,6 +209,7 @@ class ClaudeAgentSDK:
         self._TextBlock = None
         self._ToolUseBlock = None
         self._ToolResultBlock = None
+        self._StreamEvent = None
 
         self._initialize()
 
@@ -132,25 +217,19 @@ class ClaudeAgentSDK:
         """Initialize the Claude Agent SDK with all imports."""
         try:
             # Core SDK imports
-            from claude_agent_sdk import (
-                query,
-                ClaudeAgentOptions,
-                HookMatcher,
-            )
-
             # Message type imports
-            from claude_agent_sdk import (
-                AssistantMessage,
-                UserMessage,
-                SystemMessage,
-                ResultMessage,
-            )
-
             # Content block imports
             from claude_agent_sdk import (
+                AssistantMessage,
+                ClaudeAgentOptions,
+                HookMatcher,
+                ResultMessage,
+                SystemMessage,
                 TextBlock,
-                ToolUseBlock,
                 ToolResultBlock,
+                ToolUseBlock,
+                UserMessage,
+                query,
             )
 
             # Store references
@@ -164,6 +243,15 @@ class ClaudeAgentSDK:
             self._TextBlock = TextBlock
             self._ToolUseBlock = ToolUseBlock
             self._ToolResultBlock = ToolResultBlock
+
+            # StreamEvent for token-by-token streaming (optional)
+            try:
+                from claude_agent_sdk import StreamEvent
+
+                self._StreamEvent = StreamEvent
+            except ImportError:
+                self._StreamEvent = None
+                logger.info("StreamEvent not available - coarse-grained streaming only")
 
             self._sdk_available = True
             logger.info("✓ Claude Agent SDK ready ─ cwd: %s", self._cwd)
@@ -190,7 +278,7 @@ class ClaudeAgentSDK:
         self._cwd = path
         logger.info(f"📂 Working directory set to: {path}")
 
-    def _is_dangerous_command(self, command: str) -> Optional[str]:
+    def _is_dangerous_command(self, command: str) -> str | None:
         """Check if a command matches dangerous patterns.
 
         Args:
@@ -309,13 +397,65 @@ class ClaudeAgentSDK:
                 )
         return tools
 
-    async def chat(self, message: str) -> AsyncIterator[AgentEvent]:
+    def _get_mcp_servers(self) -> dict[str, dict]:
+        """Load enabled MCP server configs, filtered by tool policy.
+
+        Returns a dict keyed by server name.  The SDK supports three
+        transport types: stdio, sse, and http — each with its own
+        TypedDict shape (McpStdioServerConfig, McpSSEServerConfig,
+        McpHttpServerConfig).
+        """
+        try:
+            from pocketclaw.mcp.config import load_mcp_config
+        except ImportError:
+            return {}
+
+        configs = load_mcp_config()
+        servers: dict[str, dict] = {}
+        for cfg in configs:
+            if not cfg.enabled:
+                continue
+            if not self._policy.is_mcp_server_allowed(cfg.name):
+                logger.info("MCP server '%s' blocked by tool policy", cfg.name)
+                continue
+
+            if cfg.transport == "stdio":
+                entry: dict = {"type": "stdio", "command": cfg.command}
+                if cfg.args:
+                    entry["args"] = cfg.args
+                if cfg.env:
+                    entry["env"] = cfg.env
+            elif cfg.transport in ("http", "sse"):
+                if not cfg.url:
+                    logger.warning("MCP server '%s' (%s) has no url", cfg.name, cfg.transport)
+                    continue
+                entry = {"type": cfg.transport, "url": cfg.url}
+                if cfg.env:
+                    entry["headers"] = cfg.env
+            else:
+                logger.debug("Skipping MCP '%s' (unknown transport=%s)", cfg.name, cfg.transport)
+                continue
+
+            servers[cfg.name] = entry
+        return servers
+
+    async def chat(
+        self,
+        message: str,
+        *,
+        system_prompt: str | None = None,
+        history: list[dict] | None = None,
+    ) -> AsyncIterator[AgentEvent]:
         """Process a message through Claude Agent SDK with streaming.
 
         Uses the SDK's built-in tools and streaming capabilities.
 
         Args:
-            message: User message to process
+            message: User message to process.
+            system_prompt: Dynamic system prompt from AgentContextBuilder.
+                Falls back to _DEFAULT_IDENTITY if not provided.
+            history: Recent session history as {"role", "content"} dicts.
+                Injected into the system prompt (SDK query() takes a single prompt string).
 
         Yields:
             AgentEvent objects as the agent responds
@@ -330,6 +470,22 @@ class ClaudeAgentSDK:
         self._stop_flag = False
 
         try:
+            # Compose final system prompt: identity/memory + tool docs
+            identity = system_prompt or _DEFAULT_IDENTITY
+            final_prompt = identity + "\n" + _TOOL_INSTRUCTIONS
+
+            # Inject session history into system prompt (SDK query() takes a single string)
+            if history:
+                lines = ["# Recent Conversation"]
+                for msg in history:
+                    role = msg.get("role", "user").capitalize()
+                    content = msg.get("content", "")
+                    # Truncate very long messages to keep prompt manageable
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+                    lines.append(f"**{role}**: {content}")
+                final_prompt += "\n\n" + "\n".join(lines)
+
             # Build allowed tools list, filtered by tool policy
             all_sdk_tools = [
                 "Bash",
@@ -362,24 +518,50 @@ class ClaudeAgentSDK:
 
             # Build options
             options_kwargs = {
-                "system_prompt": SYSTEM_PROMPT,
+                "system_prompt": final_prompt,
                 "allowed_tools": allowed_tools,
                 "hooks": hooks,
                 "cwd": str(self._cwd),  # Working directory
             }
 
-            # Permission mode based on settings
-            if self.settings.bypass_permissions:
-                options_kwargs["permission_mode"] = "bypassPermissions"
-                logger.info("⚡ Permission bypass enabled")
-            else:
-                # Accept edits automatically but prompt for other things
-                options_kwargs["permission_mode"] = "acceptEdits"
+            # Wire in MCP servers (policy-filtered)
+            mcp_servers = self._get_mcp_servers()
+            if mcp_servers:
+                options_kwargs["mcp_servers"] = mcp_servers
+                logger.info("MCP: passing %d servers to Claude SDK", len(mcp_servers))
+
+            # Enable token-by-token streaming if StreamEvent is available
+            if self._StreamEvent is not None:
+                options_kwargs["include_partial_messages"] = True
+
+            # Permission handling — PocketPaw runs headless (web/chat), so
+            # there is no terminal to show interactive permission prompts.
+            # bypassPermissions auto-approves ALL tool calls (including MCP).
+            # Dangerous Bash commands are still caught by the PreToolUse hook.
+            options_kwargs["permission_mode"] = "bypassPermissions"
 
             # Create options
             options = self._ClaudeAgentOptions(**options_kwargs)
 
+            # Smart model routing (opt-in)
+            if self.settings.smart_routing_enabled:
+                from pocketclaw.agents.model_router import ModelRouter
+
+                model_router = ModelRouter(self.settings)
+                selection = model_router.classify(message)
+                options_kwargs["model"] = selection.model
+                logger.info(
+                    "Smart routing: %s -> %s (%s)",
+                    selection.complexity.value,
+                    selection.model,
+                    selection.reason,
+                )
+
             logger.debug(f"🚀 Starting Claude Agent SDK query: {message[:100]}...")
+
+            # State tracking for StreamEvent deduplication
+            _streamed_via_events = False
+            _announced_tools: set[str] = set()
 
             # Stream responses from the SDK
             async for event in self._query(prompt=message, options=options):
@@ -388,6 +570,34 @@ class ClaudeAgentSDK:
                     break
 
                 # Handle different message types using isinstance checks
+
+                # ========== StreamEvent - token-by-token streaming ==========
+                if self._StreamEvent and isinstance(event, self._StreamEvent):
+                    raw = getattr(event, "event", None) or {}
+                    event_type = raw.get("type", "")
+                    delta = raw.get("delta", {})
+
+                    if event_type == "content_block_delta":
+                        if "text" in delta:
+                            yield AgentEvent(type="message", content=delta["text"])
+                            _streamed_via_events = True
+                        elif "thinking" in delta:
+                            yield AgentEvent(type="thinking", content=delta["thinking"])
+                    elif event_type == "content_block_start":
+                        cb = raw.get("content_block", {})
+                        if cb.get("type") == "tool_use":
+                            tool_name = cb.get("name", "unknown")
+                            _announced_tools.add(tool_name)
+                            yield AgentEvent(
+                                type="tool_use",
+                                content=f"Using {tool_name}...",
+                                metadata={"name": tool_name, "input": {}},
+                            )
+                    elif event_type == "content_block_stop":
+                        # Detect thinking block stop via the partial field
+                        if getattr(event, "_block_type", None) == "thinking":
+                            yield AgentEvent(type="thinking_done", content="")
+                    continue
 
                 # ========== SystemMessage - metadata, skip ==========
                 if self._SystemMessage and isinstance(event, self._SystemMessage):
@@ -402,20 +612,26 @@ class ClaudeAgentSDK:
 
                 # ========== AssistantMessage - main content ==========
                 if self._AssistantMessage and isinstance(event, self._AssistantMessage):
-                    # Extract and yield text
-                    text = self._extract_text_from_message(event)
-                    if text:
-                        yield AgentEvent(type="message", content=text)
+                    # Skip text if already streamed via StreamEvent deltas
+                    if not _streamed_via_events:
+                        text = self._extract_text_from_message(event)
+                        if text:
+                            yield AgentEvent(type="message", content=text)
 
-                    # Emit tool_use events with proper metadata
+                    # Emit tool_use events only for tools NOT already announced
                     tools = self._extract_tool_info(event)
                     for tool in tools:
-                        logger.info(f"🔧 Tool: {tool['name']}")
-                        yield AgentEvent(
-                            type="tool_use",
-                            content=f"Using {tool['name']}...",
-                            metadata={"name": tool["name"], "input": tool["input"]},
-                        )
+                        if tool["name"] not in _announced_tools:
+                            logger.info(f"🔧 Tool: {tool['name']}")
+                            yield AgentEvent(
+                                type="tool_use",
+                                content=f"Using {tool['name']}...",
+                                metadata={"name": tool["name"], "input": tool["input"]},
+                            )
+
+                    # Reset for next turn in multi-turn loops
+                    _streamed_via_events = False
+                    _announced_tools.clear()
                     continue
 
                 # ========== ResultMessage - final result ==========
@@ -480,9 +696,15 @@ class ClaudeAgentSDKWrapper(ClaudeAgentSDK):
     Provides the `run()` method that yields dicts instead of AgentEvents.
     """
 
-    async def run(self, message: str) -> AsyncIterator[dict]:
+    async def run(
+        self,
+        message: str,
+        *,
+        system_prompt: str | None = None,
+        history: list[dict] | None = None,
+    ) -> AsyncIterator[dict]:
         """Run the agent, yielding dict chunks for compatibility."""
-        async for event in self.chat(message):
+        async for event in self.chat(message, system_prompt=system_prompt, history=history):
             yield {
                 "type": event.type,
                 "content": event.content,

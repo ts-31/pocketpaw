@@ -3,11 +3,20 @@
 import platform
 from datetime import datetime, timedelta
 
-import psutil
-
 
 def get_system_status() -> str:
     """Get formatted system status."""
+    try:
+        import psutil
+    except ImportError:
+        system = platform.system()
+        machine = platform.machine()
+        return (
+            f"🟡 **System Status (limited)**\n\n"
+            f"💻 **{system} ({machine})**\n\n"
+            f"Install psutil for full stats: pip install 'pocketpaw[desktop]'"
+        )
+
     # CPU
     cpu_percent = psutil.cpu_percent(interval=0.5)
     cpu_count = psutil.cpu_count()

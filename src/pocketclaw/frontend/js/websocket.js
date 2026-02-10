@@ -18,20 +18,23 @@ class PocketPawSocket {
 
     /**
      * Connect to WebSocket server (only if not already connected)
+     * @param {string|null} resumeSessionId - Optional session ID to resume
      */
-    connect() {
+    connect(resumeSessionId = null) {
         // Prevent multiple connections
         if (this.isConnected || this.isConnecting) {
             console.log('[WS] Already connected or connecting');
             return;
         }
-        
+
         this.isConnecting = true;
         const token = localStorage.getItem('pocketpaw_token');
-        // Auto-upgrade to wss:// when page is served over HTTPS
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const url = `${protocol}//${window.location.host}/ws`;
-        console.log('[WS] Connecting to', url);
+        let url = `ws://${window.location.host}/ws`;
+        const params = [];
+        if (token) params.push(`token=${token}`);
+        if (resumeSessionId) params.push(`resume_session=${resumeSessionId}`);
+        if (params.length > 0) url += '?' + params.join('&');
+        console.log('[WS] Connecting to', `ws://${window.location.host}/ws...`);
 
         this.ws = new WebSocket(url);
 
@@ -181,17 +184,49 @@ class PocketPawSocket {
         this.send('chat', { message });
     }
 
-    saveSettings(agentBackend, llmProvider, anthropicModel, bypassPermissions) {
+    saveSettings(settings) {
         this.send('settings', {
-            agent_backend: agentBackend,
-            llm_provider: llmProvider,
-            anthropic_model: anthropicModel,
-            bypass_permissions: bypassPermissions
+            agent_backend: settings.agentBackend,
+            llm_provider: settings.llmProvider,
+            anthropic_model: settings.anthropicModel,
+            bypass_permissions: settings.bypassPermissions,
+            web_search_provider: settings.webSearchProvider,
+            url_extract_provider: settings.urlExtractProvider,
+            injection_scan_enabled: settings.injectionScanEnabled,
+            injection_scan_llm: settings.injectionScanLlm,
+            tool_profile: settings.toolProfile,
+            plan_mode: settings.planMode,
+            plan_mode_tools: settings.planModeTools,
+            smart_routing_enabled: settings.smartRoutingEnabled,
+            model_tier_simple: settings.modelTierSimple,
+            model_tier_moderate: settings.modelTierModerate,
+            model_tier_complex: settings.modelTierComplex,
+            tts_provider: settings.ttsProvider,
+            tts_voice: settings.ttsVoice,
+            stt_model: settings.sttModel,
+            self_audit_enabled: settings.selfAuditEnabled,
+            self_audit_schedule: settings.selfAuditSchedule,
+            memory_backend: settings.memoryBackend,
+            mem0_auto_learn: settings.mem0AutoLearn,
+            mem0_llm_provider: settings.mem0LlmProvider,
+            mem0_llm_model: settings.mem0LlmModel,
+            mem0_embedder_provider: settings.mem0EmbedderProvider,
+            mem0_embedder_model: settings.mem0EmbedderModel,
+            mem0_vector_store: settings.mem0VectorStore,
+            mem0_ollama_base_url: settings.mem0OllamaBaseUrl
         });
     }
 
     saveApiKey(provider, key) {
         this.send('save_api_key', { provider, key });
+    }
+
+    switchSession(sessionId) {
+        this.send('switch_session', { session_id: sessionId });
+    }
+
+    newSession() {
+        this.send('new_session');
     }
 }
 

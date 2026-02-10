@@ -24,19 +24,32 @@ window.PocketPaw.Channels = {
                 discord: { configured: false, running: false },
                 slack: { configured: false, running: false },
                 whatsapp: { configured: false, running: false, mode: 'personal' },
-                telegram: { configured: false, running: false }
+                telegram: { configured: false, running: false },
+                signal: { configured: false, running: false },
+                matrix: { configured: false, running: false },
+                teams: { configured: false, running: false },
+                google_chat: { configured: false, running: false }
             },
             channelForms: {
                 discord: { bot_token: '' },
                 slack: { bot_token: '', app_token: '' },
                 whatsapp: { access_token: '', phone_number_id: '', verify_token: '' },
-                telegram: { bot_token: '' }
+                telegram: { bot_token: '' },
+                signal: { api_url: '', phone_number: '' },
+                matrix: { homeserver: '', user_id: '', access_token: '' },
+                teams: { app_id: '', app_password: '' },
+                google_chat: { service_account_key: '', project_id: '', subscription_id: '', _mode: 'webhook' }
             },
             channelLoading: false,
             // WhatsApp personal mode QR state
             whatsappQr: null,
             whatsappConnected: false,
-            whatsappQrPolling: null
+            whatsappQrPolling: null,
+            // Generic webhooks
+            webhookSlots: [],
+            showAddWebhook: false,
+            newWebhookName: '',
+            newWebhookDescription: ''
         };
     },
 
@@ -46,11 +59,30 @@ window.PocketPaw.Channels = {
     getMethods() {
         return {
             /**
+             * Display name for channel tabs
+             */
+            channelDisplayName(tab) {
+                const names = {
+                    discord: 'Discord',
+                    slack: 'Slack',
+                    whatsapp: 'WhatsApp',
+                    telegram: 'Telegram',
+                    signal: 'Signal',
+                    matrix: 'Matrix',
+                    teams: 'Teams',
+                    google_chat: 'GChat',
+                    webhooks: 'Webhooks'
+                };
+                return names[tab] || tab;
+            },
+
+            /**
              * Open Channels modal and fetch status
              */
             async openChannels() {
                 this.showChannels = true;
                 await this.getChannelStatus();
+                await this.loadWebhooks();
                 this.startWhatsAppQrPollingIfNeeded();
                 this.$nextTick(() => {
                     if (window.refreshIcons) window.refreshIcons();
@@ -242,6 +274,111 @@ window.PocketPaw.Channels = {
              */
             runningChannelCount() {
                 return Object.values(this.channelStatus).filter(s => s.running).length;
+            },
+
+            /**
+             * Load webhook slots from backend
+             */
+            async loadWebhooks() {
+                try {
+                    const res = await fetch('/api/webhooks');
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.webhookSlots = data.webhooks || [];
+                    }
+                } catch (e) {
+                    console.error('Failed to load webhooks', e);
+                }
+            },
+
+            /**
+             * Add a new webhook slot
+             */
+            async addWebhook() {
+                if (!this.newWebhookName.trim()) return;
+                this.channelLoading = true;
+                try {
+                    const res = await fetch('/api/webhooks/add', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: this.newWebhookName.trim(),
+                            description: this.newWebhookDescription.trim()
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'ok') {
+                        this.showToast('Webhook created!', 'success');
+                        this.newWebhookName = '';
+                        this.newWebhookDescription = '';
+                        this.showAddWebhook = false;
+                        await this.loadWebhooks();
+                    } else {
+                        this.showToast(data.detail || 'Failed to create webhook', 'error');
+                    }
+                } catch (e) {
+                    this.showToast('Failed to create webhook: ' + e.message, 'error');
+                } finally {
+                    this.channelLoading = false;
+                }
+            },
+
+            /**
+             * Remove a webhook slot
+             */
+            async removeWebhook(name) {
+                if (!confirm(`Remove webhook "${name}"?`)) return;
+                try {
+                    const res = await fetch('/api/webhooks/remove', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'ok') {
+                        this.showToast('Webhook removed', 'info');
+                        await this.loadWebhooks();
+                    } else {
+                        this.showToast(data.detail || 'Failed to remove', 'error');
+                    }
+                } catch (e) {
+                    this.showToast('Failed to remove webhook: ' + e.message, 'error');
+                }
+            },
+
+            /**
+             * Regenerate a webhook slot's secret
+             */
+            async regenerateWebhookSecret(name) {
+                if (!confirm(`Regenerate secret for "${name}"? Existing integrations will break.`)) return;
+                try {
+                    const res = await fetch('/api/webhooks/regenerate-secret', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'ok') {
+                        this.showToast('Secret regenerated', 'success');
+                        await this.loadWebhooks();
+                    } else {
+                        this.showToast(data.detail || 'Failed to regenerate', 'error');
+                    }
+                } catch (e) {
+                    this.showToast('Failed to regenerate: ' + e.message, 'error');
+                }
+            },
+
+            /**
+             * Copy text to clipboard
+             */
+            async copyToClipboard(text) {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    this.showToast('Copied!', 'success');
+                } catch (e) {
+                    this.showToast('Failed to copy', 'error');
+                }
             }
         };
     }

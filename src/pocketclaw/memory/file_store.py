@@ -1,20 +1,146 @@
 # File-based memory store implementation.
-# Created: 2026-02-02
-# Part of Nanobot Pattern Adoption - Memory System
+# Created: 2026-02-02 - Memory System
+# Updated: 2026-02-09 - Fixed UUID collision, daily file loading, search, persistent delete
+# Updated: 2026-02-10 - Session index for fast listing, delete/rename support
 #
 # Stores memories as markdown files for human readability:
 # - ~/.pocketclaw/memory/MEMORY.md     (long-term)
 # - ~/.pocketclaw/memory/2026-02-02.md (daily)
 # - ~/.pocketclaw/memory/sessions/     (session JSON files)
+# - ~/.pocketclaw/memory/sessions/_index.json (session metadata index)
 
+import asyncio
 import json
 import re
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any
 
-from pocketclaw.memory.protocol import MemoryStoreProtocol, MemoryEntry, MemoryType
+from pocketclaw.memory.protocol import MemoryEntry, MemoryType
+
+# Stop words excluded from word-overlap search scoring
+_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "about",
+        "like",
+        "through",
+        "after",
+        "over",
+        "between",
+        "out",
+        "against",
+        "during",
+        "without",
+        "before",
+        "under",
+        "around",
+        "among",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "not",
+        "so",
+        "yet",
+        "both",
+        "either",
+        "neither",
+        "each",
+        "every",
+        "all",
+        "any",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "only",
+        "own",
+        "same",
+        "than",
+        "too",
+        "very",
+        "just",
+        "because",
+        "if",
+        "when",
+        "where",
+        "how",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "me",
+        "my",
+        "we",
+        "our",
+        "you",
+        "your",
+        "he",
+        "him",
+        "his",
+        "she",
+        "her",
+        "it",
+        "its",
+        "they",
+        "them",
+        "their",
+    }
+)
+
+
+def _make_deterministic_id(path: Path, header: str, body: str) -> str:
+    """Generate a deterministic UUID5 from path, header, AND body content."""
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{path}:{header}:{body}"))
+
+
+def _tokenize(text: str) -> set[str]:
+    """Lowercase, split on non-alpha, strip stop words."""
+    words = set(re.findall(r"[a-z0-9]+", text.lower()))
+    return words - _STOP_WORDS
 
 
 class FileMemoryStore:
@@ -38,7 +164,159 @@ class FileMemoryStore:
 
         # In-memory index for fast lookup
         self._index: dict[str, MemoryEntry] = {}
+        self._session_write_locks: dict[str, asyncio.Lock] = {}
         self._load_index()
+
+        # Build session index on first run (migration)
+        if not self._index_path.exists():
+            self.rebuild_session_index()
+
+    # =========================================================================
+    # Session Index
+    # =========================================================================
+
+    @property
+    def _index_path(self) -> Path:
+        """Path to the session index file."""
+        return self.sessions_path / "_index.json"
+
+    def _load_session_index(self) -> dict:
+        """Read session index from disk. Returns empty dict if missing/corrupt."""
+        if not self._index_path.exists():
+            return {}
+        try:
+            return json.loads(self._index_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_session_index(self, index: dict) -> None:
+        """Atomic write of session index (write to .tmp then rename)."""
+        tmp = self._index_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(index, indent=2), encoding="utf-8")
+        tmp.rename(self._index_path)
+
+    def _update_session_index(
+        self, session_key: str, entry: MemoryEntry, session_data: list[dict]
+    ) -> None:
+        """Update a single entry in the session index after a message save."""
+        index = self._load_session_index()
+        safe_key = session_key.replace(":", "_").replace("/", "_")
+
+        # Extract channel from session_key (format: "channel:uuid")
+        parts = session_key.split(":", 1)
+        channel = parts[0] if len(parts) > 1 else "unknown"
+
+        # Find first user message for title
+        title = ""
+        for msg in session_data:
+            if msg.get("role") == "user" and msg.get("content", "").strip():
+                title = msg["content"].strip()[:80]
+                break
+        if not title:
+            title = "New Chat"
+
+        # Last message preview
+        last_msg = session_data[-1] if session_data else {}
+        preview = last_msg.get("content", "")[:120]
+
+        # Timestamps
+        first_msg = session_data[0] if session_data else {}
+        created = first_msg.get("timestamp", datetime.now().isoformat())
+        last_activity = last_msg.get("timestamp", datetime.now().isoformat())
+
+        # Preserve existing title if user renamed it
+        existing = index.get(safe_key, {})
+        if existing.get("user_title"):
+            title = existing["user_title"]
+
+        index[safe_key] = {
+            "title": title,
+            "channel": channel,
+            "created": existing.get("created", created),
+            "last_activity": last_activity,
+            "message_count": len(session_data),
+            "preview": preview,
+        }
+        # Preserve user_title flag if set
+        if existing.get("user_title"):
+            index[safe_key]["user_title"] = existing["user_title"]
+
+        self._save_session_index(index)
+
+    def rebuild_session_index(self) -> dict:
+        """Full directory scan to build index from all session files."""
+        index: dict = {}
+        for session_file in self.sessions_path.glob("*.json"):
+            if session_file.name.startswith("_") or session_file.name.endswith("_compaction.json"):
+                continue
+
+            safe_key = session_file.stem
+            try:
+                data = json.loads(session_file.read_text(encoding="utf-8"))
+                if not data or not isinstance(data, list):
+                    continue
+
+                # Derive channel from safe_key (format: "channel_uuid")
+                parts = safe_key.split("_", 1)
+                channel = parts[0] if len(parts) > 1 else "unknown"
+
+                # First user message as title
+                title = "New Chat"
+                for msg in data:
+                    if msg.get("role") == "user" and msg.get("content", "").strip():
+                        title = msg["content"].strip()[:80]
+                        break
+
+                first_msg = data[0]
+                last_msg = data[-1]
+
+                index[safe_key] = {
+                    "title": title,
+                    "channel": channel,
+                    "created": first_msg.get("timestamp", ""),
+                    "last_activity": last_msg.get("timestamp", ""),
+                    "message_count": len(data),
+                    "preview": last_msg.get("content", "")[:120],
+                }
+            except (json.JSONDecodeError, KeyError, OSError):
+                continue
+
+        self._save_session_index(index)
+        return index
+
+    def delete_session(self, session_key: str) -> bool:
+        """Delete a session file, compaction cache, and index entry."""
+        safe_key = session_key.replace(":", "_").replace("/", "_")
+        session_file = self.sessions_path / f"{safe_key}.json"
+        compaction_file = self.sessions_path / f"{safe_key}_compaction.json"
+
+        if not session_file.exists():
+            return False
+
+        session_file.unlink()
+        if compaction_file.exists():
+            compaction_file.unlink()
+
+        # Remove from index
+        index = self._load_session_index()
+        index.pop(safe_key, None)
+        self._save_session_index(index)
+
+        # Clean up write lock
+        self._session_write_locks.pop(session_key, None)
+
+        return True
+
+    def update_session_title(self, session_key: str, title: str) -> bool:
+        """Update the title of a session in the index."""
+        safe_key = session_key.replace(":", "_").replace("/", "_")
+        index = self._load_session_index()
+        if safe_key not in index:
+            return False
+        index[safe_key]["title"] = title
+        index[safe_key]["user_title"] = title  # Mark as user-renamed
+        self._save_session_index(index)
+        return True
 
     def _load_index(self) -> None:
         """Load existing memories into index."""
@@ -46,10 +324,11 @@ class FileMemoryStore:
         if self.long_term_file.exists():
             self._parse_markdown_file(self.long_term_file, MemoryType.LONG_TERM)
 
-        # Load today's daily notes
-        today_file = self._get_daily_file(date.today())
-        if today_file.exists():
-            self._parse_markdown_file(today_file, MemoryType.DAILY)
+        # Load ALL daily files (not just today's)
+        for daily_file in sorted(
+            self.base_path.glob("[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md")
+        ):
+            self._parse_markdown_file(daily_file, MemoryType.DAILY)
 
     def _parse_markdown_file(self, path: Path, memory_type: MemoryType) -> None:
         """Parse a markdown file into memory entries."""
@@ -68,7 +347,7 @@ class FileMemoryStore:
             body = "\n".join(lines[1:]).strip()
 
             if body:
-                entry_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{path}:{header}"))
+                entry_id = _make_deterministic_id(path, header, body)
                 self._index[entry_id] = MemoryEntry(
                     id=entry_id,
                     type=memory_type,
@@ -96,20 +375,35 @@ class FileMemoryStore:
 
     async def save(self, entry: MemoryEntry) -> str:
         """Save a memory entry."""
-        if not entry.id:
-            entry.id = str(uuid.uuid4())
+        if entry.type == MemoryType.SESSION:
+            # Session entries use random UUIDs (no collision issue)
+            if not entry.id:
+                entry.id = str(uuid.uuid4())
+            entry.updated_at = datetime.now()
+            self._index[entry.id] = entry
+            await self._save_session_entry(entry)
+            return entry.id
 
+        # For LONG_TERM and DAILY: compute deterministic ID from content
+        header = entry.metadata.get("header", "Memory")
+        if entry.type == MemoryType.LONG_TERM:
+            target_path = self.long_term_file
+        else:
+            target_path = self._get_daily_file(date.today())
+
+        det_id = _make_deterministic_id(target_path, header, entry.content)
+
+        # Dedup: if this exact content already exists, skip
+        if det_id in self._index:
+            return det_id
+
+        entry.id = det_id
+        entry.metadata["source"] = str(target_path)
         entry.updated_at = datetime.now()
         self._index[entry.id] = entry
 
-        # Persist based on type
-        if entry.type == MemoryType.LONG_TERM:
-            await self._append_to_markdown(self.long_term_file, entry)
-        elif entry.type == MemoryType.DAILY:
-            daily_file = self._get_daily_file(date.today())
-            await self._append_to_markdown(daily_file, entry)
-        elif entry.type == MemoryType.SESSION:
-            await self._save_session_entry(entry)
+        # Persist to markdown
+        await self._append_to_markdown(target_path, entry)
 
         return entry.id
 
@@ -130,41 +424,77 @@ class FileMemoryStore:
         if not entry.session_key:
             return
 
-        session_file = self._get_session_file(entry.session_key)
+        # Per-session lock to prevent concurrent read-modify-write corruption
+        if entry.session_key not in self._session_write_locks:
+            self._session_write_locks[entry.session_key] = asyncio.Lock()
 
-        # Load existing session
-        session_data = []
-        if session_file.exists():
-            try:
-                session_data = json.loads(session_file.read_text())
-            except json.JSONDecodeError:
-                pass
+        async with self._session_write_locks[entry.session_key]:
+            session_file = self._get_session_file(entry.session_key)
 
-        # Append new entry
-        session_data.append(
-            {
-                "id": entry.id,
-                "role": entry.role,
-                "content": entry.content,
-                "timestamp": entry.created_at.isoformat(),
-                "metadata": entry.metadata,
-            }
-        )
+            # Load existing session
+            session_data = []
+            if session_file.exists():
+                try:
+                    session_data = json.loads(session_file.read_text())
+                except json.JSONDecodeError:
+                    pass
 
-        # Save back
-        session_file.write_text(json.dumps(session_data, indent=2))
+            # Append new entry
+            session_data.append(
+                {
+                    "id": entry.id,
+                    "role": entry.role,
+                    "content": entry.content,
+                    "timestamp": entry.created_at.isoformat(),
+                    "metadata": entry.metadata,
+                }
+            )
+
+            # Save back
+            session_file.write_text(json.dumps(session_data, indent=2))
+
+            # Update session index
+            self._update_session_index(entry.session_key, entry, session_data)
 
     async def get(self, entry_id: str) -> MemoryEntry | None:
         """Get a memory entry by ID."""
         return self._index.get(entry_id)
 
     async def delete(self, entry_id: str) -> bool:
-        """Delete a memory entry."""
-        if entry_id in self._index:
-            del self._index[entry_id]
-            # Note: Doesn't delete from files (append-only design)
-            return True
-        return False
+        """Delete a memory entry and rewrite source file."""
+        if entry_id not in self._index:
+            return False
+
+        entry = self._index.pop(entry_id)
+
+        # Rewrite the source markdown file without this entry
+        source = entry.metadata.get("source")
+        if source:
+            self._rewrite_markdown(Path(source))
+
+        return True
+
+    def _rewrite_markdown(self, path: Path) -> None:
+        """Reconstruct a markdown file from remaining index entries for that file."""
+        source_str = str(path)
+        entries = [e for e in self._index.values() if e.metadata.get("source") == source_str]
+
+        if not entries:
+            # No entries left — remove file
+            if path.exists():
+                path.unlink()
+            return
+
+        parts = []
+        for e in entries:
+            header = e.metadata.get("header", "Memory")
+            tags_str = " ".join(f"#{t}" for t in e.tags) if e.tags else ""
+            section = f"## {header}\n\n{e.content}"
+            if tags_str:
+                section += f"\n\n{tags_str}"
+            parts.append(section)
+
+        path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
 
     async def search(
         self,
@@ -173,8 +503,9 @@ class FileMemoryStore:
         tags: list[str] | None = None,
         limit: int = 10,
     ) -> list[MemoryEntry]:
-        """Search memories."""
-        results = []
+        """Search memories using word-overlap scoring."""
+        candidates: list[tuple[float, MemoryEntry]] = []
+        query_words = _tokenize(query) if query else set()
 
         for entry in self._index.values():
             # Type filter
@@ -185,16 +516,27 @@ class FileMemoryStore:
             if tags and not any(t in entry.tags for t in tags):
                 continue
 
-            # Query filter (simple substring match)
-            if query and query.lower() not in entry.content.lower():
-                continue
+            # Query filter: word-overlap scoring
+            if query_words:
+                content_words = _tokenize(entry.content)
+                # Also include header in searchable text
+                header = entry.metadata.get("header", "")
+                if header:
+                    content_words |= _tokenize(header)
 
-            results.append(entry)
+                overlap = query_words & content_words
+                if not overlap:
+                    continue
+                score = len(overlap) / len(query_words)
+            else:
+                score = 0.0
 
-            if len(results) >= limit:
-                break
+            candidates.append((score, entry))
 
-        return results
+        # Sort by score descending
+        candidates.sort(key=lambda x: x[0], reverse=True)
+
+        return [entry for _, entry in candidates[:limit]]
 
     async def get_by_type(self, memory_type: MemoryType, limit: int = 100) -> list[MemoryEntry]:
         """Get all memories of a specific type."""

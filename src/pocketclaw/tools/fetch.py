@@ -4,7 +4,11 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+try:
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+except ImportError:
+    InlineKeyboardButton = None
+    InlineKeyboardMarkup = None
 
 
 def is_safe_path(path: Path, jail: Path) -> bool:

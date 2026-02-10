@@ -23,7 +23,9 @@ function app() {
         ...window.PocketPaw.Transparency.getState(),
         ...window.PocketPaw.RemoteAccess.getState(),
         ...window.PocketPaw.MissionControl.getState(),
-        ...window.PocketPaw.Channels.getState()
+        ...window.PocketPaw.Channels.getState(),
+        ...window.PocketPaw.MCP.getState(),
+        ...window.PocketPaw.Sessions.getState()
     };
 
     // Assemble feature methods
@@ -36,7 +38,9 @@ function app() {
         ...window.PocketPaw.Transparency.getMethods(),
         ...window.PocketPaw.RemoteAccess.getMethods(),
         ...window.PocketPaw.MissionControl.getMethods(),
-        ...window.PocketPaw.Channels.getMethods()
+        ...window.PocketPaw.Channels.getMethods(),
+        ...window.PocketPaw.MCP.getMethods(),
+        ...window.PocketPaw.Sessions.getMethods()
     };
 
     return {
@@ -47,6 +51,20 @@ function app() {
         showSettings: false,
         showScreenshot: false,
         screenshotSrc: '',
+
+        // Settings panel state
+        settingsSection: 'general',
+        settingsMobileView: 'list',
+        settingsSections: [
+            { id: 'general', label: 'General', icon: 'settings' },
+            { id: 'security', label: 'Security', icon: 'shield' },
+            { id: 'behavior', label: 'Behavior', icon: 'brain' },
+            { id: 'memory', label: 'Memory', icon: 'database' },
+            { id: 'apikeys', label: 'API Keys', icon: 'key' },
+            { id: 'search', label: 'Search', icon: 'search' },
+            { id: 'services', label: 'Services', icon: 'puzzle' },
+            { id: 'system', label: 'System', icon: 'activity' },
+        ],
 
         // Terminal logs
         logs: [],
@@ -61,19 +79,59 @@ function app() {
 
         // Settings
         settings: {
-            agentBackend: 'claude_agent_sdk',  // Default: Claude Agent SDK (recommended)
+            agentBackend: 'claude_agent_sdk',
             llmProvider: 'auto',
             anthropicModel: 'claude-sonnet-4-5-20250929',
-            bypassPermissions: false
+            bypassPermissions: false,
+            webSearchProvider: 'tavily',
+            urlExtractProvider: 'auto',
+            injectionScanEnabled: true,
+            injectionScanLlm: false,
+            toolProfile: 'full',
+            planMode: false,
+            planModeTools: 'shell,write_file,edit_file',
+            smartRoutingEnabled: false,
+            modelTierSimple: 'claude-haiku-4-5-20251001',
+            modelTierModerate: 'claude-sonnet-4-5-20250929',
+            modelTierComplex: 'claude-opus-4-6',
+            ttsProvider: 'openai',
+            ttsVoice: 'alloy',
+            sttModel: 'whisper-1',
+            selfAuditEnabled: true,
+            selfAuditSchedule: '0 3 * * *',
+            memoryBackend: 'file',
+            mem0AutoLearn: true,
+            mem0LlmProvider: 'anthropic',
+            mem0LlmModel: 'claude-haiku-4-5-20251001',
+            mem0EmbedderProvider: 'openai',
+            mem0EmbedderModel: 'text-embedding-3-small',
+            mem0VectorStore: 'qdrant',
+            mem0OllamaBaseUrl: 'http://localhost:11434'
         },
 
         // API Keys (not persisted client-side, but we track if saved on server)
         apiKeys: {
             anthropic: '',
-            openai: ''
+            openai: '',
+            tavily: '',
+            brave: '',
+            parallel: '',
+            elevenlabs: '',
+            google_oauth_id: '',
+            google_oauth_secret: '',
+            spotify_client_id: '',
+            spotify_client_secret: ''
         },
         hasAnthropicKey: false,
         hasOpenaiKey: false,
+        hasTavilyKey: false,
+        hasBraveKey: false,
+        hasParallelKey: false,
+        hasElevenlabsKey: false,
+        hasGoogleOAuthId: false,
+        hasGoogleOAuthSecret: false,
+        hasSpotifyClientId: false,
+        hasSpotifyClientSecret: false,
 
         // Spread feature states
         ...featureStates,
@@ -123,10 +181,33 @@ function app() {
             this.setupSocketHandlers();
 
             // Connect WebSocket (singleton - will only connect once)
-            socket.connect();
+            const lastSession = StateManager.load('lastSession');
+            socket.connect(lastSession);
+
+            // Load sessions for sidebar
+            this.loadSessions();
 
             // Start status polling (low frequency)
             this.startStatusPolling();
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                // Cmd/Ctrl+N: New chat
+                if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+                    e.preventDefault();
+                    this.createNewChat();
+                }
+                // Cmd/Ctrl+K: Focus search
+                if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                    e.preventDefault();
+                    const searchInput = document.querySelector('.session-search-input');
+                    if (searchInput) searchInput.focus();
+                }
+                // Escape: Cancel rename
+                if (e.key === 'Escape' && this.editingSessionId) {
+                    this.cancelRenameSession();
+                }
+            });
 
             // Refresh Lucide icons after initial render
             this.$nextTick(() => {
@@ -151,6 +232,12 @@ function app() {
                 socket.send('get_reminders');
                 socket.send('get_intentions');
                 socket.send('get_skills');
+
+                // Resume last session if WS connect didn't handle it via query param
+                const lastSession = StateManager.load('lastSession');
+                if (lastSession && !this.currentSessionId) {
+                    this.selectSession(lastSession);
+                }
 
                 // Auto-activate agent mode
                 if (this.agentActive) {
@@ -206,6 +293,10 @@ function app() {
             socket.on('connection_info', (data) => this.handleConnectionInfo(data));
             socket.on('system_event', (data) => this.handleSystemEvent(data));
 
+            // Session handlers
+            socket.on('session_history', (data) => this.handleSessionHistory(data));
+            socket.on('new_session', (data) => this.handleNewSession(data));
+
             // Note: Mission Control events come through system_event
             // They are handled in handleSystemEvent based on event_type prefix 'mc_'
         },
@@ -238,9 +329,89 @@ function app() {
                 if (serverSettings.bypassPermissions !== undefined) {
                     this.settings.bypassPermissions = serverSettings.bypassPermissions;
                 }
+                if (serverSettings.webSearchProvider) {
+                    this.settings.webSearchProvider = serverSettings.webSearchProvider;
+                }
+                if (serverSettings.urlExtractProvider) {
+                    this.settings.urlExtractProvider = serverSettings.urlExtractProvider;
+                }
+                if (serverSettings.injectionScanEnabled !== undefined) {
+                    this.settings.injectionScanEnabled = serverSettings.injectionScanEnabled;
+                }
+                if (serverSettings.injectionScanLlm !== undefined) {
+                    this.settings.injectionScanLlm = serverSettings.injectionScanLlm;
+                }
+                if (serverSettings.toolProfile) {
+                    this.settings.toolProfile = serverSettings.toolProfile;
+                }
+                if (serverSettings.planMode !== undefined) {
+                    this.settings.planMode = serverSettings.planMode;
+                }
+                if (serverSettings.planModeTools !== undefined) {
+                    this.settings.planModeTools = serverSettings.planModeTools;
+                }
+                if (serverSettings.smartRoutingEnabled !== undefined) {
+                    this.settings.smartRoutingEnabled = serverSettings.smartRoutingEnabled;
+                }
+                if (serverSettings.modelTierSimple) {
+                    this.settings.modelTierSimple = serverSettings.modelTierSimple;
+                }
+                if (serverSettings.modelTierModerate) {
+                    this.settings.modelTierModerate = serverSettings.modelTierModerate;
+                }
+                if (serverSettings.modelTierComplex) {
+                    this.settings.modelTierComplex = serverSettings.modelTierComplex;
+                }
+                if (serverSettings.ttsProvider) {
+                    this.settings.ttsProvider = serverSettings.ttsProvider;
+                }
+                if (serverSettings.ttsVoice !== undefined) {
+                    this.settings.ttsVoice = serverSettings.ttsVoice;
+                }
+                if (serverSettings.sttModel) {
+                    this.settings.sttModel = serverSettings.sttModel;
+                }
+                if (serverSettings.selfAuditEnabled !== undefined) {
+                    this.settings.selfAuditEnabled = serverSettings.selfAuditEnabled;
+                }
+                if (serverSettings.selfAuditSchedule) {
+                    this.settings.selfAuditSchedule = serverSettings.selfAuditSchedule;
+                }
+                if (serverSettings.memoryBackend) {
+                    this.settings.memoryBackend = serverSettings.memoryBackend;
+                }
+                if (serverSettings.mem0AutoLearn !== undefined) {
+                    this.settings.mem0AutoLearn = serverSettings.mem0AutoLearn;
+                }
+                if (serverSettings.mem0LlmProvider) {
+                    this.settings.mem0LlmProvider = serverSettings.mem0LlmProvider;
+                }
+                if (serverSettings.mem0LlmModel) {
+                    this.settings.mem0LlmModel = serverSettings.mem0LlmModel;
+                }
+                if (serverSettings.mem0EmbedderProvider) {
+                    this.settings.mem0EmbedderProvider = serverSettings.mem0EmbedderProvider;
+                }
+                if (serverSettings.mem0EmbedderModel) {
+                    this.settings.mem0EmbedderModel = serverSettings.mem0EmbedderModel;
+                }
+                if (serverSettings.mem0VectorStore) {
+                    this.settings.mem0VectorStore = serverSettings.mem0VectorStore;
+                }
+                if (serverSettings.mem0OllamaBaseUrl) {
+                    this.settings.mem0OllamaBaseUrl = serverSettings.mem0OllamaBaseUrl;
+                }
                 // Store API key availability (for UI feedback)
                 this.hasAnthropicKey = serverSettings.hasAnthropicKey || false;
                 this.hasOpenaiKey = serverSettings.hasOpenaiKey || false;
+                this.hasTavilyKey = serverSettings.hasTavilyKey || false;
+                this.hasBraveKey = serverSettings.hasBraveKey || false;
+                this.hasParallelKey = serverSettings.hasParallelKey || false;
+                this.hasElevenlabsKey = serverSettings.hasElevenlabsKey || false;
+                this.hasGoogleOAuthId = serverSettings.hasGoogleOAuthId || false;
+                this.hasGoogleOAuthSecret = serverSettings.hasGoogleOAuthSecret || false;
+                this.hasSpotifyClientId = serverSettings.hasSpotifyClientId || false;
+                this.hasSpotifyClientSecret = serverSettings.hasSpotifyClientSecret || false;
 
                 // Log agent status if available (for debugging)
                 if (serverSettings.agentStatus) {
@@ -296,15 +467,18 @@ function app() {
         },
 
         /**
+         * Open settings modal (resets mobile view)
+         */
+        openSettings() {
+            this.settingsMobileView = 'list';
+            this.showSettings = true;
+        },
+
+        /**
          * Save settings
          */
         saveSettings() {
-            socket.saveSettings(
-                this.settings.agentBackend,
-                this.settings.llmProvider,
-                this.settings.anthropicModel,
-                this.settings.bypassPermissions
-            );
+            socket.saveSettings(this.settings);
             this.log('Settings updated', 'info');
             this.showToast('Settings saved', 'success');
         },
@@ -321,6 +495,24 @@ function app() {
 
             socket.saveApiKey(provider, key);
             this.apiKeys[provider] = ''; // Clear input
+
+            // Update local hasKey flags immediately
+            const keyMap = {
+                'anthropic': 'hasAnthropicKey',
+                'openai': 'hasOpenaiKey',
+                'tavily': 'hasTavilyKey',
+                'brave': 'hasBraveKey',
+                'parallel': 'hasParallelKey',
+                'elevenlabs': 'hasElevenlabsKey',
+                'google_oauth_id': 'hasGoogleOAuthId',
+                'google_oauth_secret': 'hasGoogleOAuthSecret',
+                'spotify_client_id': 'hasSpotifyClientId',
+                'spotify_client_secret': 'hasSpotifyClientSecret'
+            };
+            if (keyMap[provider]) {
+                this[keyMap[provider]] = true;
+            }
+
             this.log(`Saved ${provider} API key`, 'success');
             this.showToast(`${provider.charAt(0).toUpperCase() + provider.slice(1)} API key saved!`, 'success');
         },

@@ -76,12 +76,26 @@ window.PocketPaw.Transparency = {
                     return;
                 }
 
+                // Handle inbox update events
+                if (eventType === 'inbox_update') {
+                    if (this.handleInboxUpdate) this.handleInboxUpdate(data.data || {});
+                    return;
+                }
+
                 // Handle standard system events
                 let message = '';
                 let level = 'info';
 
                 if (eventType === 'thinking') {
-                    message = `<span class="text-accent animate-pulse">Thinking...</span>`;
+                    if (data.data && data.data.content) {
+                        const snippet = data.data.content.substring(0, 120);
+                        const ellipsis = data.data.content.length > 120 ? '...' : '';
+                        message = `<span class="text-white/40 italic">${snippet}${ellipsis}</span>`;
+                    } else {
+                        message = `<span class="text-accent animate-pulse">Thinking...</span>`;
+                    }
+                } else if (eventType === 'thinking_done') {
+                    message = `<span class="text-white/40">Thinking complete</span>`;
                 } else if (eventType === 'tool_start') {
                     message = `🔧 <b>${data.data.name}</b> <span class="text-white/50">${JSON.stringify(data.data.params)}</span>`;
                     level = 'warning';
@@ -132,12 +146,12 @@ window.PocketPaw.Transparency = {
                 fetch('/api/memory/sessions')
                     .then(r => r.json())
                     .then(data => {
-                        this.sessionsList = data;
+                        this.sessionsList = Array.isArray(data) ? data : (data.sessions || []);
                         this.updateMemoryStats();
 
                         // Auto-select current session if in list
-                        if (this.sessionId && data.some(s => s.id === this.sessionId)) {
-                            this.selectSession(this.sessionId);
+                        if (this.sessionId && this.sessionsList.some(s => s.id === this.sessionId)) {
+                            this.selectMemorySession(this.sessionId);
                         }
                     })
                     .catch(e => {
@@ -145,7 +159,7 @@ window.PocketPaw.Transparency = {
                     });
             },
 
-            selectSession(sessionId) {
+            selectMemorySession(sessionId) {
                 this.selectedSession = sessionId;
                 fetch(`/api/memory/session?id=${sessionId}`)
                     .then(r => r.json())

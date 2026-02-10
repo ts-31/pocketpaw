@@ -3,7 +3,7 @@
 
   Created: 2026-02-06
   Configure and manage all channel adapters from the web dashboard.
-  4 tabs: Discord / Slack / WhatsApp / Telegram
+  8 tabs: Discord / Slack / WhatsApp / Telegram / Signal / Matrix / Teams / Google Chat
 -->
 <!-- Channels Modal -->
 <div
@@ -25,14 +25,14 @@
     </div>
 
     <!-- Tab Buttons -->
-    <div class="flex border-b border-[var(--glass-border)] shrink-0">
-        <template x-for="tab in ['discord', 'slack', 'whatsapp', 'telegram']" :key="tab">
+    <div class="flex flex-wrap border-b border-[var(--glass-border)] shrink-0">
+        <template x-for="tab in ['discord', 'slack', 'whatsapp', 'telegram', 'signal', 'matrix', 'teams', 'google_chat', 'webhooks']" :key="tab">
             <button
-                class="flex-1 py-3 text-[13px] font-medium transition-all flex items-center justify-center gap-1.5"
+                class="flex-1 min-w-[25%] py-3 text-[12px] font-medium transition-all flex items-center justify-center gap-1"
                 :class="channelsTab === tab ? 'text-[var(--accent-color)] border-b-2 border-[var(--accent-color)] bg-white/5' : 'text-white/50 hover:text-white/70 hover:bg-white/5'"
                 @click="channelsTab = tab"
             >
-                <span x-text="tab.charAt(0).toUpperCase() + tab.slice(1)"></span>
+                <span x-text="channelDisplayName(tab)"></span>
                 <!-- Status dot -->
                 <span
                     class="w-2 h-2 rounded-full shrink-0"
@@ -419,6 +419,472 @@
                         <i x-show="!channelLoading" data-lucide="square" class="w-4 h-4"></i>
                         Stop Telegram
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Signal Tab ==================== -->
+        <div x-show="channelsTab === 'signal'" x-transition.opacity>
+            <div class="flex flex-col gap-5">
+                <!-- Status Badge -->
+                <div class="flex items-center justify-between">
+                    <span class="text-[13px] text-white/60">Status</span>
+                    <span class="text-[11px] font-bold px-2.5 py-1 rounded-full border"
+                        :class="channelStatus.signal?.running
+                            ? 'bg-[var(--success-color)]/10 text-[var(--success-color)] border-[var(--success-color)]/20'
+                            : (channelStatus.signal?.configured
+                                ? 'bg-[var(--warning-color)]/10 text-[var(--warning-color)] border-[var(--warning-color)]/20'
+                                : 'bg-white/5 text-white/40 border-white/10')"
+                        x-text="channelStatus.signal?.running ? 'RUNNING' : (channelStatus.signal?.configured ? 'CONFIGURED' : 'NOT CONFIGURED')">
+                    </span>
+                </div>
+
+                <!-- Signal API URL -->
+                <div class="flex flex-col gap-2">
+                    <label class="text-[13px] font-medium text-[var(--text-secondary)]">Signal CLI REST API URL</label>
+                    <input
+                        type="text"
+                        x-model="channelForms.signal.api_url"
+                        placeholder="http://localhost:8080"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                    />
+                </div>
+
+                <!-- Phone Number -->
+                <div class="flex flex-col gap-2">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[13px] font-medium text-[var(--text-secondary)]">Phone Number</label>
+                        <span x-show="channelStatus.signal?.configured" class="text-xs font-medium text-[var(--success-color)] flex items-center gap-1">
+                            <i data-lucide="check" class="w-3 h-3"></i> Saved
+                        </span>
+                    </div>
+                    <input
+                        type="text"
+                        x-model="channelForms.signal.phone_number"
+                        :placeholder="channelStatus.signal?.configured ? '••••••••' : '+1234567890'"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                    />
+                </div>
+
+                <!-- Save -->
+                <button
+                    class="w-full bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 disabled:opacity-50"
+                    @click="saveChannelConfig('signal')"
+                    :disabled="channelLoading || !channelForms.signal.phone_number"
+                >Save Signal Config</button>
+
+                <p class="text-[12px] text-white/40">
+                    Requires <a href="https://github.com/bbernhard/signal-cli-rest-api" target="_blank" class="text-[var(--accent-color)] hover:underline">signal-cli-rest-api</a> running locally.
+                </p>
+
+                <!-- Start/Stop Toggle -->
+                <div class="flex gap-2 pt-2 border-t border-[var(--glass-border)]">
+                    <button
+                        x-show="!channelStatus.signal?.running"
+                        class="w-full bg-[var(--success-color)] hover:brightness-110 text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                        @click="toggleChannel('signal')"
+                        :disabled="channelLoading || !channelStatus.signal?.configured"
+                    >
+                        <i x-show="channelLoading" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <i x-show="!channelLoading" data-lucide="play" class="w-4 h-4"></i>
+                        Start Signal
+                    </button>
+                    <button
+                        x-show="channelStatus.signal?.running"
+                        class="w-full bg-[var(--danger-color)] hover:brightness-110 text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                        @click="toggleChannel('signal')"
+                        :disabled="channelLoading"
+                    >
+                        <i x-show="channelLoading" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <i x-show="!channelLoading" data-lucide="square" class="w-4 h-4"></i>
+                        Stop Signal
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Matrix Tab ==================== -->
+        <div x-show="channelsTab === 'matrix'" x-transition.opacity>
+            <div class="flex flex-col gap-5">
+                <!-- Status Badge -->
+                <div class="flex items-center justify-between">
+                    <span class="text-[13px] text-white/60">Status</span>
+                    <span class="text-[11px] font-bold px-2.5 py-1 rounded-full border"
+                        :class="channelStatus.matrix?.running
+                            ? 'bg-[var(--success-color)]/10 text-[var(--success-color)] border-[var(--success-color)]/20'
+                            : (channelStatus.matrix?.configured
+                                ? 'bg-[var(--warning-color)]/10 text-[var(--warning-color)] border-[var(--warning-color)]/20'
+                                : 'bg-white/5 text-white/40 border-white/10')"
+                        x-text="channelStatus.matrix?.running ? 'RUNNING' : (channelStatus.matrix?.configured ? 'CONFIGURED' : 'NOT CONFIGURED')">
+                    </span>
+                </div>
+
+                <!-- Homeserver -->
+                <div class="flex flex-col gap-2">
+                    <label class="text-[13px] font-medium text-[var(--text-secondary)]">Homeserver URL</label>
+                    <input
+                        type="text"
+                        x-model="channelForms.matrix.homeserver"
+                        placeholder="https://matrix.org"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                    />
+                </div>
+
+                <!-- User ID -->
+                <div class="flex flex-col gap-2">
+                    <label class="text-[13px] font-medium text-[var(--text-secondary)]">User ID</label>
+                    <input
+                        type="text"
+                        x-model="channelForms.matrix.user_id"
+                        placeholder="@bot:matrix.org"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                    />
+                </div>
+
+                <!-- Access Token -->
+                <div class="flex flex-col gap-2">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[13px] font-medium text-[var(--text-secondary)]">Access Token</label>
+                        <span x-show="channelStatus.matrix?.configured" class="text-xs font-medium text-[var(--success-color)] flex items-center gap-1">
+                            <i data-lucide="check" class="w-3 h-3"></i> Saved
+                        </span>
+                    </div>
+                    <input
+                        type="password"
+                        x-model="channelForms.matrix.access_token"
+                        :placeholder="channelStatus.matrix?.configured ? '••••••••••••••••' : 'Matrix access token...'"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                    />
+                </div>
+
+                <!-- Save -->
+                <button
+                    class="w-full bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 disabled:opacity-50"
+                    @click="saveChannelConfig('matrix')"
+                    :disabled="channelLoading || (!channelForms.matrix.homeserver && !channelForms.matrix.access_token)"
+                >Save Matrix Config</button>
+
+                <!-- Start/Stop Toggle -->
+                <div class="flex gap-2 pt-2 border-t border-[var(--glass-border)]">
+                    <button
+                        x-show="!channelStatus.matrix?.running"
+                        class="w-full bg-[var(--success-color)] hover:brightness-110 text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                        @click="toggleChannel('matrix')"
+                        :disabled="channelLoading || !channelStatus.matrix?.configured"
+                    >
+                        <i x-show="channelLoading" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <i x-show="!channelLoading" data-lucide="play" class="w-4 h-4"></i>
+                        Start Matrix
+                    </button>
+                    <button
+                        x-show="channelStatus.matrix?.running"
+                        class="w-full bg-[var(--danger-color)] hover:brightness-110 text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                        @click="toggleChannel('matrix')"
+                        :disabled="channelLoading"
+                    >
+                        <i x-show="channelLoading" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <i x-show="!channelLoading" data-lucide="square" class="w-4 h-4"></i>
+                        Stop Matrix
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Teams Tab ==================== -->
+        <div x-show="channelsTab === 'teams'" x-transition.opacity>
+            <div class="flex flex-col gap-5">
+                <!-- Status Badge -->
+                <div class="flex items-center justify-between">
+                    <span class="text-[13px] text-white/60">Status</span>
+                    <span class="text-[11px] font-bold px-2.5 py-1 rounded-full border"
+                        :class="channelStatus.teams?.running
+                            ? 'bg-[var(--success-color)]/10 text-[var(--success-color)] border-[var(--success-color)]/20'
+                            : (channelStatus.teams?.configured
+                                ? 'bg-[var(--warning-color)]/10 text-[var(--warning-color)] border-[var(--warning-color)]/20'
+                                : 'bg-white/5 text-white/40 border-white/10')"
+                        x-text="channelStatus.teams?.running ? 'RUNNING' : (channelStatus.teams?.configured ? 'CONFIGURED' : 'NOT CONFIGURED')">
+                    </span>
+                </div>
+
+                <!-- App ID -->
+                <div class="flex flex-col gap-2">
+                    <label class="text-[13px] font-medium text-[var(--text-secondary)]">App ID (MS Bot Framework)</label>
+                    <input
+                        type="text"
+                        x-model="channelForms.teams.app_id"
+                        :placeholder="channelStatus.teams?.configured ? '••••••••' : 'Microsoft App ID...'"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                    />
+                </div>
+
+                <!-- App Password -->
+                <div class="flex flex-col gap-2">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[13px] font-medium text-[var(--text-secondary)]">App Password</label>
+                        <span x-show="channelStatus.teams?.configured" class="text-xs font-medium text-[var(--success-color)] flex items-center gap-1">
+                            <i data-lucide="check" class="w-3 h-3"></i> Saved
+                        </span>
+                    </div>
+                    <input
+                        type="password"
+                        x-model="channelForms.teams.app_password"
+                        :placeholder="channelStatus.teams?.configured ? '••••••••••••••••' : 'Microsoft App Password...'"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                    />
+                </div>
+
+                <!-- Save -->
+                <button
+                    class="w-full bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 disabled:opacity-50"
+                    @click="saveChannelConfig('teams')"
+                    :disabled="channelLoading || (!channelForms.teams.app_id && !channelForms.teams.app_password)"
+                >Save Teams Config</button>
+
+                <!-- Start/Stop Toggle -->
+                <div class="flex gap-2 pt-2 border-t border-[var(--glass-border)]">
+                    <button
+                        x-show="!channelStatus.teams?.running"
+                        class="w-full bg-[var(--success-color)] hover:brightness-110 text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                        @click="toggleChannel('teams')"
+                        :disabled="channelLoading || !channelStatus.teams?.configured"
+                    >
+                        <i x-show="channelLoading" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <i x-show="!channelLoading" data-lucide="play" class="w-4 h-4"></i>
+                        Start Teams
+                    </button>
+                    <button
+                        x-show="channelStatus.teams?.running"
+                        class="w-full bg-[var(--danger-color)] hover:brightness-110 text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                        @click="toggleChannel('teams')"
+                        :disabled="channelLoading"
+                    >
+                        <i x-show="channelLoading" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <i x-show="!channelLoading" data-lucide="square" class="w-4 h-4"></i>
+                        Stop Teams
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Google Chat Tab ==================== -->
+        <div x-show="channelsTab === 'google_chat'" x-transition.opacity>
+            <div class="flex flex-col gap-5">
+                <!-- Status Badge -->
+                <div class="flex items-center justify-between">
+                    <span class="text-[13px] text-white/60">Status</span>
+                    <span class="text-[11px] font-bold px-2.5 py-1 rounded-full border"
+                        :class="channelStatus.google_chat?.running
+                            ? 'bg-[var(--success-color)]/10 text-[var(--success-color)] border-[var(--success-color)]/20'
+                            : (channelStatus.google_chat?.configured
+                                ? 'bg-[var(--warning-color)]/10 text-[var(--warning-color)] border-[var(--warning-color)]/20'
+                                : 'bg-white/5 text-white/40 border-white/10')"
+                        x-text="channelStatus.google_chat?.running ? 'RUNNING' : (channelStatus.google_chat?.configured ? 'CONFIGURED' : 'NOT CONFIGURED')">
+                    </span>
+                </div>
+
+                <!-- Mode Selector -->
+                <div class="flex flex-col gap-2">
+                    <label class="text-[13px] font-medium text-[var(--text-secondary)]">Mode</label>
+                    <div class="flex gap-2">
+                        <button
+                            class="flex-1 py-2 px-3 rounded-[10px] text-[13px] font-medium transition-all border"
+                            :class="channelForms.google_chat._mode === 'webhook'
+                                ? 'bg-[var(--accent-color)]/15 text-[var(--accent-color)] border-[var(--accent-color)]/30'
+                                : 'bg-black/20 text-white/50 border-[var(--glass-border)] hover:text-white/70 hover:bg-white/5'"
+                            @click="channelForms.google_chat._mode = 'webhook'"
+                        >Webhook</button>
+                        <button
+                            class="flex-1 py-2 px-3 rounded-[10px] text-[13px] font-medium transition-all border"
+                            :class="channelForms.google_chat._mode === 'pubsub'
+                                ? 'bg-[var(--accent-color)]/15 text-[var(--accent-color)] border-[var(--accent-color)]/30'
+                                : 'bg-black/20 text-white/50 border-[var(--glass-border)] hover:text-white/70 hover:bg-white/5'"
+                            @click="channelForms.google_chat._mode = 'pubsub'"
+                        >Pub/Sub</button>
+                    </div>
+                </div>
+
+                <!-- Service Account Key -->
+                <div class="flex flex-col gap-2">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[13px] font-medium text-[var(--text-secondary)]">Service Account Key Path</label>
+                        <span x-show="channelStatus.google_chat?.configured" class="text-xs font-medium text-[var(--success-color)] flex items-center gap-1">
+                            <i data-lucide="check" class="w-3 h-3"></i> Saved
+                        </span>
+                    </div>
+                    <input
+                        type="text"
+                        x-model="channelForms.google_chat.service_account_key"
+                        :placeholder="channelStatus.google_chat?.configured ? '••••••••' : '/path/to/service-account.json'"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                    />
+                </div>
+
+                <!-- Pub/Sub fields (only shown in pubsub mode) -->
+                <template x-if="channelForms.google_chat._mode === 'pubsub'">
+                    <div class="flex flex-col gap-4">
+                        <div class="flex flex-col gap-2">
+                            <label class="text-[13px] font-medium text-[var(--text-secondary)]">GCP Project ID</label>
+                            <input
+                                type="text"
+                                x-model="channelForms.google_chat.project_id"
+                                placeholder="my-project-id"
+                                class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                            />
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="text-[13px] font-medium text-[var(--text-secondary)]">Pub/Sub Subscription ID</label>
+                            <input
+                                type="text"
+                                x-model="channelForms.google_chat.subscription_id"
+                                placeholder="my-subscription"
+                                class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                            />
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Save -->
+                <button
+                    class="w-full bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 disabled:opacity-50"
+                    @click="saveChannelConfig('google_chat')"
+                    :disabled="channelLoading || !channelForms.google_chat.service_account_key"
+                >Save Google Chat Config</button>
+
+                <!-- Start/Stop Toggle -->
+                <div class="flex gap-2 pt-2 border-t border-[var(--glass-border)]">
+                    <button
+                        x-show="!channelStatus.google_chat?.running"
+                        class="w-full bg-[var(--success-color)] hover:brightness-110 text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                        @click="toggleChannel('google_chat')"
+                        :disabled="channelLoading || !channelStatus.google_chat?.configured"
+                    >
+                        <i x-show="channelLoading" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <i x-show="!channelLoading" data-lucide="play" class="w-4 h-4"></i>
+                        Start Google Chat
+                    </button>
+                    <button
+                        x-show="channelStatus.google_chat?.running"
+                        class="w-full bg-[var(--danger-color)] hover:brightness-110 text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                        @click="toggleChannel('google_chat')"
+                        :disabled="channelLoading"
+                    >
+                        <i x-show="channelLoading" data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>
+                        <i x-show="!channelLoading" data-lucide="square" class="w-4 h-4"></i>
+                        Stop Google Chat
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Webhooks Tab ==================== -->
+        <div x-show="channelsTab === 'webhooks'" x-transition.opacity>
+            <div class="flex flex-col gap-5">
+                <!-- Header + Add Button -->
+                <div class="flex items-center justify-between">
+                    <span class="text-[13px] text-white/60" x-text="webhookSlots.length + ' webhook' + (webhookSlots.length !== 1 ? 's' : '') + ' configured'"></span>
+                    <button
+                        class="text-[12px] font-medium text-[var(--accent-color)] hover:underline flex items-center gap-1"
+                        @click="showAddWebhook = !showAddWebhook"
+                    >
+                        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                        <span x-text="showAddWebhook ? 'Cancel' : 'Add Webhook'"></span>
+                    </button>
+                </div>
+
+                <!-- Inline Add Form -->
+                <div x-show="showAddWebhook" x-transition.opacity class="flex flex-col gap-3 p-4 bg-black/20 rounded-[12px] border border-[var(--glass-border)]">
+                    <div class="flex flex-col gap-2">
+                        <label class="text-[13px] font-medium text-[var(--text-secondary)]">Name</label>
+                        <input
+                            type="text"
+                            x-model="newWebhookName"
+                            placeholder="github-events"
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                        />
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <label class="text-[13px] font-medium text-[var(--text-secondary)]">Description (optional)</label>
+                        <input
+                            type="text"
+                            x-model="newWebhookDescription"
+                            placeholder="GitHub push/PR events"
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2.5 px-3.5 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                        />
+                    </div>
+                    <button
+                        class="w-full bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white py-2.5 rounded-[10px] text-[13px] font-medium transition-all active:scale-95 disabled:opacity-50"
+                        @click="addWebhook()"
+                        :disabled="channelLoading || !newWebhookName.trim()"
+                    >Create Webhook</button>
+                </div>
+
+                <!-- Webhook Slots List -->
+                <template x-if="webhookSlots.length === 0 && !showAddWebhook">
+                    <div class="text-center py-8 text-white/30 text-[13px]">
+                        No webhooks configured yet. Click "Add Webhook" to create one.
+                    </div>
+                </template>
+
+                <template x-for="slot in webhookSlots" :key="slot.name">
+                    <div class="flex flex-col gap-3 p-4 bg-black/20 rounded-[12px] border border-[var(--glass-border)]">
+                        <!-- Name + Description + Remove -->
+                        <div class="flex items-start justify-between">
+                            <div>
+                                <div class="text-[14px] font-medium text-white" x-text="slot.name"></div>
+                                <div x-show="slot.description" class="text-[12px] text-white/40 mt-0.5" x-text="slot.description"></div>
+                            </div>
+                            <button
+                                class="p-1.5 text-white/30 hover:text-[var(--danger-color)] hover:bg-[var(--danger-color)]/10 rounded-lg transition-colors"
+                                @click="removeWebhook(slot.name)"
+                                title="Remove webhook"
+                            >
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+
+                        <!-- URL -->
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[11px] font-medium text-white/40 uppercase tracking-wider">URL</label>
+                            <div class="flex gap-2 items-center">
+                                <code class="flex-1 text-[12px] text-[var(--accent-color)] bg-black/30 px-3 py-2 rounded-[8px] truncate" x-text="slot.url"></code>
+                                <button
+                                    class="shrink-0 p-2 text-white/40 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                                    @click="copyToClipboard(slot.url)"
+                                    title="Copy URL"
+                                >
+                                    <i data-lucide="copy" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Secret -->
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[11px] font-medium text-white/40 uppercase tracking-wider">Secret</label>
+                            <div class="flex gap-2 items-center">
+                                <code class="flex-1 text-[12px] text-white/50 bg-black/30 px-3 py-2 rounded-[8px] truncate" x-text="slot.secret.substring(0, 8) + '••••••••••••'"></code>
+                                <button
+                                    class="shrink-0 p-2 text-white/40 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                                    @click="copyToClipboard(slot.secret)"
+                                    title="Copy secret"
+                                >
+                                    <i data-lucide="copy" class="w-4 h-4"></i>
+                                </button>
+                                <button
+                                    class="shrink-0 p-2 text-white/40 hover:text-[var(--warning-color)] hover:bg-[var(--warning-color)]/10 rounded-lg transition-colors"
+                                    @click="regenerateWebhookSecret(slot.name)"
+                                    title="Regenerate secret"
+                                >
+                                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Usage hint -->
+                <div x-show="webhookSlots.length > 0" class="text-[11px] text-white/30 leading-relaxed">
+                    <strong>Usage:</strong> <code class="text-[11px]">curl -X POST &lt;url&gt; -H "X-Webhook-Secret: &lt;secret&gt;" -H "Content-Type: application/json" -d '{"content": "hello"}'</code>
+                    <br/>Add <code class="text-[11px]">?wait=true</code> to wait for the agent's response.
                 </div>
             </div>
         </div>

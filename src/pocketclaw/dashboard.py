@@ -21,13 +21,19 @@ import logging
 import uuid
 from pathlib import Path
 
-import qrcode
-import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+try:
+    import qrcode
+    import uvicorn
+    from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import StreamingResponse
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.templating import Jinja2Templates
+except ImportError as _exc:
+    raise ImportError(
+        "Dashboard dependencies (fastapi, uvicorn, qrcode, jinja2) are required "
+        "but not installed. Install them with: pip install 'pocketpaw[dashboard]'"
+    ) from _exc
 
 from pocketclaw.agents.loop import AgentLoop
 from pocketclaw.bootstrap import DefaultBootstrapProvider
@@ -44,7 +50,7 @@ from pocketclaw.tunnel import get_tunnel_manager
 
 logger = logging.getLogger(__name__)
 
-# Global Nanobot Components
+
 ws_adapter = WebSocketAdapter()
 agent_loop = AgentLoop()
 # Retain active_connections for legacy broadcasts until fully migrated
@@ -52,6 +58,9 @@ active_connections: list[WebSocket] = []
 
 # Channel adapters (auto-started when configured, keyed by channel name)
 _channel_adapters: dict[str, object] = {}
+
+# Set by run_dashboard() so the startup event can open the browser once the server is ready
+_open_browser_url: str | None = None
 
 # Get frontend directory
 FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -178,6 +187,76 @@ async def _start_channel_adapter(channel: str, settings: Settings | None = None)
         _channel_adapters["telegram"] = adapter
         return True
 
+    if channel == "signal":
+        if not settings.signal_phone_number:
+            return False
+        from pocketclaw.bus.adapters.signal_adapter import SignalAdapter
+
+        adapter = SignalAdapter(
+            api_url=settings.signal_api_url,
+            phone_number=settings.signal_phone_number,
+            allowed_phone_numbers=settings.signal_allowed_phone_numbers,
+        )
+        await adapter.start(bus)
+        _channel_adapters["signal"] = adapter
+        return True
+
+    if channel == "matrix":
+        if not settings.matrix_homeserver or not settings.matrix_user_id:
+            return False
+        from pocketclaw.bus.adapters.matrix_adapter import MatrixAdapter
+
+        adapter = MatrixAdapter(
+            homeserver=settings.matrix_homeserver,
+            user_id=settings.matrix_user_id,
+            access_token=settings.matrix_access_token,
+            password=settings.matrix_password,
+            allowed_room_ids=settings.matrix_allowed_room_ids,
+            device_id=settings.matrix_device_id,
+        )
+        await adapter.start(bus)
+        _channel_adapters["matrix"] = adapter
+        return True
+
+    if channel == "teams":
+        if not settings.teams_app_id or not settings.teams_app_password:
+            return False
+        from pocketclaw.bus.adapters.teams_adapter import TeamsAdapter
+
+        adapter = TeamsAdapter(
+            app_id=settings.teams_app_id,
+            app_password=settings.teams_app_password,
+            allowed_tenant_ids=settings.teams_allowed_tenant_ids,
+            webhook_port=settings.teams_webhook_port,
+        )
+        await adapter.start(bus)
+        _channel_adapters["teams"] = adapter
+        return True
+
+    if channel == "google_chat":
+        if not settings.gchat_service_account_key:
+            return False
+        from pocketclaw.bus.adapters.gchat_adapter import GoogleChatAdapter
+
+        adapter = GoogleChatAdapter(
+            mode=settings.gchat_mode,
+            service_account_key=settings.gchat_service_account_key,
+            project_id=settings.gchat_project_id,
+            subscription_id=settings.gchat_subscription_id,
+            allowed_space_ids=settings.gchat_allowed_space_ids,
+        )
+        await adapter.start(bus)
+        _channel_adapters["google_chat"] = adapter
+        return True
+
+    if channel == "webhook":
+        from pocketclaw.bus.adapters.webhook_adapter import WebhookAdapter
+
+        adapter = WebhookAdapter()
+        await adapter.start(bus)
+        _channel_adapters["webhook"] = adapter
+        return True
+
     return False
 
 
@@ -199,16 +278,43 @@ async def startup_event():
 
     # Start Agent Loop
     asyncio.create_task(agent_loop.start())
-    logger.info("Agent Loop started (Nanobot Architecture)")
+    logger.info("Agent Loop started")
 
     # Auto-start all configured channel adapters
     settings = Settings.load()
-    for channel in ("discord", "slack", "whatsapp", "telegram"):
+    for ch in (
+        "discord",
+        "slack",
+        "whatsapp",
+        "telegram",
+        "signal",
+        "matrix",
+        "teams",
+        "google_chat",
+    ):
         try:
-            if await _start_channel_adapter(channel, settings):
-                logger.info(f"{channel.title()} adapter auto-started alongside dashboard")
+            if await _start_channel_adapter(ch, settings):
+                logger.info(f"{ch.title()} adapter auto-started alongside dashboard")
         except Exception as e:
-            logger.warning(f"Failed to auto-start {channel} adapter: {e}")
+            logger.warning(f"Failed to auto-start {ch} adapter: {e}")
+
+    # Auto-start webhook adapter if webhooks are configured
+    if settings.webhook_configs:
+        try:
+            if await _start_channel_adapter("webhook", settings):
+                count = len(settings.webhook_configs)
+                logger.info("Webhook adapter auto-started (%d slots)", count)
+        except Exception as e:
+            logger.warning("Failed to auto-start webhook adapter: %s", e)
+
+    # Auto-start enabled MCP servers
+    try:
+        from pocketclaw.mcp.manager import get_mcp_manager
+
+        mcp = get_mcp_manager()
+        await mcp.start_enabled_servers()
+    except Exception as e:
+        logger.warning("Failed to start MCP servers: %s", e)
 
     # Start reminder scheduler
     scheduler = get_scheduler()
@@ -217,6 +323,12 @@ async def startup_event():
     # Start proactive daemon
     daemon = get_daemon()
     daemon.start(stream_callback=broadcast_intention)
+
+    # Open browser now that the server is actually listening
+    if _open_browser_url:
+        import webbrowser
+
+        webbrowser.open(_open_browser_url)
 
 
 @app.on_event("shutdown")
@@ -240,6 +352,209 @@ async def shutdown_event():
     # Stop reminder scheduler
     scheduler = get_scheduler()
     scheduler.stop()
+
+    # Stop MCP servers
+    try:
+        from pocketclaw.mcp.manager import get_mcp_manager
+
+        mcp = get_mcp_manager()
+        await mcp.stop_all()
+    except Exception as e:
+        logger.warning("Error stopping MCP servers: %s", e)
+
+
+# ==================== MCP Server API ====================
+
+
+@app.get("/api/mcp/status")
+async def get_mcp_status():
+    """Get status of all configured MCP servers."""
+    from pocketclaw.mcp.manager import get_mcp_manager
+
+    mgr = get_mcp_manager()
+    return mgr.get_server_status()
+
+
+@app.post("/api/mcp/add")
+async def add_mcp_server(request: Request):
+    """Add a new MCP server configuration and optionally start it."""
+    from pocketclaw.mcp.config import MCPServerConfig
+    from pocketclaw.mcp.manager import get_mcp_manager
+
+    data = await request.json()
+    config = MCPServerConfig(
+        name=data.get("name", ""),
+        transport=data.get("transport", "stdio"),
+        command=data.get("command", ""),
+        args=data.get("args", []),
+        url=data.get("url", ""),
+        env=data.get("env", {}),
+        enabled=data.get("enabled", True),
+    )
+    if not config.name:
+        raise HTTPException(status_code=400, detail="Server name is required")
+
+    mgr = get_mcp_manager()
+    mgr.add_server_config(config)
+
+    # Auto-start if enabled
+    if config.enabled:
+        try:
+            await mgr.start_server(config)
+        except Exception as e:
+            logger.warning("Failed to auto-start MCP server '%s': %s", config.name, e)
+
+    return {"status": "ok"}
+
+
+@app.post("/api/mcp/remove")
+async def remove_mcp_server(request: Request):
+    """Remove an MCP server config and stop it if running."""
+    from pocketclaw.mcp.manager import get_mcp_manager
+
+    data = await request.json()
+    name = data.get("name", "")
+
+    mgr = get_mcp_manager()
+    await mgr.stop_server(name)
+    removed = mgr.remove_server_config(name)
+    if not removed:
+        return {"error": f"Server '{name}' not found"}
+    return {"status": "ok"}
+
+
+@app.post("/api/mcp/toggle")
+async def toggle_mcp_server(request: Request):
+    """Enable or disable an MCP server."""
+    from pocketclaw.mcp.manager import get_mcp_manager
+
+    data = await request.json()
+    name = data.get("name", "")
+
+    mgr = get_mcp_manager()
+    new_state = mgr.toggle_server_config(name)
+    if new_state is None:
+        return {"error": f"Server '{name}' not found"}
+
+    # Start or stop based on new state
+    if new_state:
+        from pocketclaw.mcp.config import load_mcp_config
+
+        configs = load_mcp_config()
+        config = next((c for c in configs if c.name == name), None)
+        if config:
+            await mgr.start_server(config)
+    else:
+        await mgr.stop_server(name)
+
+    return {"status": "ok", "enabled": new_state}
+
+
+@app.post("/api/mcp/test")
+async def test_mcp_server(request: Request):
+    """Test an MCP server connection and return discovered tools."""
+    from pocketclaw.mcp.config import MCPServerConfig
+    from pocketclaw.mcp.manager import get_mcp_manager
+
+    data = await request.json()
+    config = MCPServerConfig(
+        name=data.get("name", "test"),
+        transport=data.get("transport", "stdio"),
+        command=data.get("command", ""),
+        args=data.get("args", []),
+        url=data.get("url", ""),
+        env=data.get("env", {}),
+    )
+
+    mgr = get_mcp_manager()
+    success = await mgr.start_server(config)
+    if not success:
+        status = mgr.get_server_status().get(config.name, {})
+        return {"connected": False, "error": status.get("error", "Unknown error"), "tools": []}
+
+    tools = mgr.discover_tools(config.name)
+    # Stop the test server
+    await mgr.stop_server(config.name)
+    return {
+        "connected": True,
+        "tools": [{"name": t.name, "description": t.description} for t in tools],
+    }
+
+
+# ==================== MCP Preset Routes ====================
+
+
+@app.get("/api/mcp/presets")
+async def list_mcp_presets():
+    """Return all MCP presets with installed flag."""
+    from pocketclaw.mcp.config import load_mcp_config
+    from pocketclaw.mcp.presets import get_all_presets
+
+    installed_names = {c.name for c in load_mcp_config()}
+    presets = get_all_presets()
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "icon": p.icon,
+            "category": p.category,
+            "package": p.package,
+            "transport": p.transport,
+            "url": p.url,
+            "docs_url": p.docs_url,
+            "installed": p.id in installed_names,
+            "env_keys": [
+                {
+                    "key": e.key,
+                    "label": e.label,
+                    "required": e.required,
+                    "placeholder": e.placeholder,
+                    "secret": e.secret,
+                }
+                for e in p.env_keys
+            ],
+        }
+        for p in presets
+    ]
+
+
+@app.post("/api/mcp/presets/install")
+async def install_mcp_preset(request: Request):
+    """Install an MCP preset by ID with user-supplied env vars."""
+    from fastapi.responses import JSONResponse
+
+    from pocketclaw.mcp.manager import get_mcp_manager
+    from pocketclaw.mcp.presets import get_preset, preset_to_config
+
+    data = await request.json()
+    preset_id = data.get("preset_id", "")
+    env = data.get("env", {})
+    extra_args = data.get("extra_args", None)
+
+    preset = get_preset(preset_id)
+    if not preset:
+        return JSONResponse({"error": f"Unknown preset: {preset_id}"}, status_code=404)
+
+    # Validate required env keys
+    missing = [ek.key for ek in preset.env_keys if ek.required and not env.get(ek.key)]
+    if missing:
+        return JSONResponse(
+            {"error": f"Missing required env vars: {', '.join(missing)}"},
+            status_code=400,
+        )
+
+    config = preset_to_config(preset, env=env, extra_args=extra_args)
+    mgr = get_mcp_manager()
+    mgr.add_server_config(config)
+    connected = await mgr.start_server(config)
+    tools = mgr.discover_tools(config.name) if connected else []
+
+    return {
+        "status": "ok",
+        "connected": connected,
+        "tools": [{"name": t.name, "description": t.description} for t in tools],
+    }
 
 
 # ==================== WhatsApp Webhook Routes ====================
@@ -286,6 +601,183 @@ async def get_whatsapp_qr():
     }
 
 
+# ==================== Generic Inbound Webhook API ====================
+
+
+@app.post("/webhook/inbound/{webhook_name}")
+async def webhook_inbound(
+    webhook_name: str,
+    request: Request,
+    wait: bool = Query(False),
+):
+    """Receive an inbound webhook POST.
+
+    Auth: ``X-Webhook-Secret`` header must match the slot's secret,
+    OR ``X-Webhook-Signature: sha256=<hex>`` HMAC-SHA256 of the raw body.
+    """
+    import hashlib
+    import hmac
+
+    settings = Settings.load()
+    slot_dict = None
+    for cfg in settings.webhook_configs:
+        if cfg.get("name") == webhook_name:
+            slot_dict = cfg
+            break
+
+    if slot_dict is None:
+        raise HTTPException(status_code=404, detail=f"Webhook '{webhook_name}' not found")
+
+    from pocketclaw.bus.adapters.webhook_adapter import WebhookSlotConfig
+
+    slot = WebhookSlotConfig(
+        name=slot_dict["name"],
+        secret=slot_dict["secret"],
+        description=slot_dict.get("description", ""),
+        sync_timeout=slot_dict.get("sync_timeout", settings.webhook_sync_timeout),
+    )
+
+    # --- Auth: secret header or HMAC signature ---
+    raw_body = await request.body()
+    secret_header = request.headers.get("X-Webhook-Secret", "")
+    sig_header = request.headers.get("X-Webhook-Signature", "")
+
+    authed = False
+    if secret_header and secret_header == slot.secret:
+        authed = True
+    elif sig_header.startswith("sha256="):
+        expected = hmac.new(slot.secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(sig_header[7:], expected):
+            authed = True
+
+    if not authed:
+        raise HTTPException(status_code=403, detail="Invalid webhook secret or signature")
+
+    # Parse JSON body
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    # Ensure webhook adapter is running (stateless — auto-start is cheap)
+    if "webhook" not in _channel_adapters:
+        try:
+            await _start_channel_adapter("webhook", settings)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to start webhook adapter: {e}")
+
+    adapter = _channel_adapters["webhook"]
+    request_id = str(uuid.uuid4())
+
+    if not wait:
+        await adapter.handle_webhook(slot, body, request_id, sync=False)
+        return {"status": "accepted", "request_id": request_id}
+
+    # Sync mode — wait for agent response
+    response_text = await adapter.handle_webhook(slot, body, request_id, sync=True)
+    if response_text is None:
+        return {"status": "timeout", "request_id": request_id}
+    return {"status": "ok", "request_id": request_id, "response": response_text}
+
+
+@app.get("/api/webhooks")
+async def list_webhooks(request: Request):
+    """List all configured webhook slots with generated URLs."""
+    settings = Settings.load()
+    host = request.headers.get("host", f"localhost:{settings.web_port}")
+    protocol = "https" if "trycloudflare" in host else "http"
+
+    slots = []
+    for cfg in settings.webhook_configs:
+        name = cfg.get("name", "")
+        slots.append(
+            {
+                "name": name,
+                "description": cfg.get("description", ""),
+                "secret": cfg.get("secret", ""),
+                "sync_timeout": cfg.get("sync_timeout", settings.webhook_sync_timeout),
+                "url": f"{protocol}://{host}/webhook/inbound/{name}",
+            }
+        )
+    return {"webhooks": slots}
+
+
+@app.post("/api/webhooks/add")
+async def add_webhook(request: Request):
+    """Create a new webhook slot (auto-generates secret)."""
+    import secrets
+
+    data = await request.json()
+    name = data.get("name", "").strip()
+    description = data.get("description", "").strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Webhook name is required")
+
+    # Validate name: alphanumeric, hyphens, underscores only
+    import re
+
+    if not re.match(r"^[a-zA-Z0-9_-]+$", name):
+        raise HTTPException(
+            status_code=400,
+            detail="Webhook name must be alphanumeric (hyphens and underscores allowed)",
+        )
+
+    settings = Settings.load()
+
+    # Check for duplicate name
+    for cfg in settings.webhook_configs:
+        if cfg.get("name") == name:
+            raise HTTPException(status_code=409, detail=f"Webhook '{name}' already exists")
+
+    secret = secrets.token_urlsafe(32)
+    slot = {
+        "name": name,
+        "secret": secret,
+        "description": description,
+        "sync_timeout": data.get("sync_timeout", settings.webhook_sync_timeout),
+    }
+    settings.webhook_configs.append(slot)
+    settings.save()
+
+    return {"status": "ok", "webhook": slot}
+
+
+@app.post("/api/webhooks/remove")
+async def remove_webhook(request: Request):
+    """Remove a webhook slot by name."""
+    data = await request.json()
+    name = data.get("name", "")
+
+    settings = Settings.load()
+    original_len = len(settings.webhook_configs)
+    settings.webhook_configs = [c for c in settings.webhook_configs if c.get("name") != name]
+
+    if len(settings.webhook_configs) == original_len:
+        raise HTTPException(status_code=404, detail=f"Webhook '{name}' not found")
+
+    settings.save()
+    return {"status": "ok"}
+
+
+@app.post("/api/webhooks/regenerate-secret")
+async def regenerate_webhook_secret(request: Request):
+    """Regenerate a webhook slot's secret."""
+    import secrets
+
+    data = await request.json()
+    name = data.get("name", "")
+
+    settings = Settings.load()
+    for cfg in settings.webhook_configs:
+        if cfg.get("name") == name:
+            cfg["secret"] = secrets.token_urlsafe(32)
+            settings.save()
+            return {"status": "ok", "secret": cfg["secret"]}
+
+    raise HTTPException(status_code=404, detail=f"Webhook '{name}' not found")
+
+
 # ==================== Channel Configuration API ====================
 
 # Maps channel config keys from the frontend to Settings field names
@@ -312,6 +804,32 @@ _CHANNEL_CONFIG_KEYS: dict[str, dict[str, str]] = {
         "bot_token": "telegram_bot_token",
         "allowed_user_id": "allowed_user_id",
     },
+    "signal": {
+        "api_url": "signal_api_url",
+        "phone_number": "signal_phone_number",
+        "allowed_phone_numbers": "signal_allowed_phone_numbers",
+    },
+    "matrix": {
+        "homeserver": "matrix_homeserver",
+        "user_id": "matrix_user_id",
+        "access_token": "matrix_access_token",
+        "password": "matrix_password",
+        "allowed_room_ids": "matrix_allowed_room_ids",
+        "device_id": "matrix_device_id",
+    },
+    "teams": {
+        "app_id": "teams_app_id",
+        "app_password": "teams_app_password",
+        "allowed_tenant_ids": "teams_allowed_tenant_ids",
+        "webhook_port": "teams_webhook_port",
+    },
+    "google_chat": {
+        "mode": "gchat_mode",
+        "service_account_key": "gchat_service_account_key",
+        "project_id": "gchat_project_id",
+        "subscription_id": "gchat_subscription_id",
+        "allowed_space_ids": "gchat_allowed_space_ids",
+    },
 }
 
 # Required fields per channel (at least these must be set to start the adapter)
@@ -320,6 +838,10 @@ _CHANNEL_REQUIRED: dict[str, list[str]] = {
     "slack": ["slack_bot_token", "slack_app_token"],
     "whatsapp": ["whatsapp_access_token", "whatsapp_phone_number_id"],
     "telegram": ["telegram_bot_token"],
+    "signal": ["signal_phone_number"],
+    "matrix": ["matrix_homeserver", "matrix_user_id"],
+    "teams": ["teams_app_id", "teams_app_password"],
+    "google_chat": ["gchat_service_account_key"],
 }
 
 
@@ -347,10 +869,20 @@ async def get_channels_status():
     """Get status of all 4 channel adapters."""
     settings = Settings.load()
     result = {}
-    for channel in ("discord", "slack", "whatsapp", "telegram"):
-        result[channel] = {
-            "configured": _channel_is_configured(channel, settings),
-            "running": _channel_is_running(channel),
+    all_channels = (
+        "discord",
+        "slack",
+        "whatsapp",
+        "telegram",
+        "signal",
+        "matrix",
+        "teams",
+        "google_chat",
+    )
+    for ch in all_channels:
+        result[ch] = {
+            "configured": _channel_is_configured(ch, settings),
+            "running": _channel_is_running(ch),
         }
     # Add WhatsApp mode info
     result["whatsapp"]["mode"] = settings.whatsapp_mode
@@ -419,10 +951,153 @@ async def toggle_channel(request: Request):
     }
 
 
+# OAuth scopes per service
+_OAUTH_SCOPES: dict[str, list[str]] = {
+    "google_gmail": [
+        "https://mail.google.com/",
+    ],
+    "google_calendar": [
+        "https://www.googleapis.com/auth/calendar",
+    ],
+    "google_drive": [
+        "https://www.googleapis.com/auth/drive",
+    ],
+    "google_docs": [
+        "https://www.googleapis.com/auth/documents",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ],
+    "spotify": [
+        "user-read-playback-state",
+        "user-modify-playback-state",
+        "user-read-currently-playing",
+        "playlist-read-private",
+        "playlist-modify-public",
+        "playlist-modify-private",
+    ],
+}
+
+
+@app.get("/api/oauth/authorize")
+async def oauth_authorize(service: str = Query("google_gmail")):
+    """Start OAuth flow — redirects user to provider consent screen."""
+    from fastapi.responses import RedirectResponse
+
+    settings = Settings.load()
+
+    scopes = _OAUTH_SCOPES.get(service)
+    if not scopes:
+        raise HTTPException(status_code=400, detail=f"Unknown service: {service}")
+
+    # Determine provider and credentials from service name
+    if service == "spotify":
+        provider = "spotify"
+        client_id = settings.spotify_client_id
+        if not client_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Spotify Client ID not configured. Set it in Settings first.",
+            )
+    else:
+        provider = "google"
+        client_id = settings.google_oauth_client_id
+        if not client_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Google OAuth Client ID not configured. Set it in Settings first.",
+            )
+
+    from pocketclaw.integrations.oauth import OAuthManager
+
+    manager = OAuthManager()
+    redirect_uri = f"http://localhost:{settings.web_port}/oauth/callback"
+    state = f"{provider}:{service}"
+
+    auth_url = manager.get_auth_url(
+        provider=provider,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        scopes=scopes,
+        state=state,
+    )
+    return RedirectResponse(auth_url)
+
+
+@app.get("/oauth/callback")
+async def oauth_callback(
+    code: str = Query(""),
+    state: str = Query(""),
+    error: str = Query(""),
+):
+    """OAuth callback route — exchanges auth code for tokens."""
+    from fastapi.responses import HTMLResponse
+
+    if error:
+        return HTMLResponse(f"<h2>OAuth Error</h2><p>{error}</p><p>You can close this window.</p>")
+
+    if not code:
+        return HTMLResponse("<h2>Missing authorization code</h2>")
+
+    try:
+        from pocketclaw.integrations.oauth import OAuthManager
+        from pocketclaw.integrations.token_store import TokenStore
+
+        settings = Settings.load()
+        manager = OAuthManager(TokenStore())
+
+        # State encodes: "{provider}:{service}" e.g. "google:google_gmail"
+        parts = state.split(":", 1)
+        provider = parts[0] if parts else "google"
+        service = parts[1] if len(parts) > 1 else "google_gmail"
+
+        redirect_uri = f"http://localhost:{settings.web_port}/oauth/callback"
+
+        scopes = _OAUTH_SCOPES.get(service, [])
+
+        # Resolve credentials per provider
+        if provider == "spotify":
+            client_id = settings.spotify_client_id or ""
+            client_secret = settings.spotify_client_secret or ""
+        else:
+            client_id = settings.google_oauth_client_id or ""
+            client_secret = settings.google_oauth_client_secret or ""
+
+        await manager.exchange_code(
+            provider=provider,
+            service=service,
+            code=code,
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scopes=scopes,
+        )
+
+        return HTMLResponse(
+            "<h2>Authorization Successful</h2>"
+            "<p>Tokens saved. You can close this window and return to PocketPaw.</p>"
+        )
+
+    except Exception as e:
+        logger.error("OAuth callback error: %s", e)
+        return HTMLResponse(f"<h2>OAuth Error</h2><p>{e}</p>")
+
+
+def _static_version() -> str:
+    """Generate a cache-busting version string from JS file mtimes."""
+    import hashlib
+
+    js_dir = FRONTEND_DIR / "js"
+    if not js_dir.exists():
+        return "0"
+    mtimes = []
+    for f in sorted(js_dir.rglob("*.js")):
+        mtimes.append(str(int(f.stat().st_mtime)))
+    return hashlib.md5("|".join(mtimes).encode()).hexdigest()[:8]
+
+
 @app.get("/")
 async def index(request: Request):
     """Serve the main dashboard page."""
-    return templates.TemplateResponse("base.html", {"request": request})
+    return templates.TemplateResponse("base.html", {"request": request, "v": _static_version()})
 
 
 # ==================== Auth Middleware ====================
@@ -466,7 +1141,15 @@ async def verify_token(
 async def auth_middleware(request: Request, call_next):
     # Exempt routes
     # Allow getting QR code to login; allow WhatsApp webhook (Meta verification)
-    exempt_paths = ["/static", "/favicon.ico", "/api/qr", "/webhook/whatsapp", "/api/whatsapp/qr"]
+    exempt_paths = [
+        "/static",
+        "/favicon.ico",
+        "/api/qr",
+        "/webhook/whatsapp",
+        "/webhook/inbound",
+        "/api/whatsapp/qr",
+        "/oauth/callback",
+    ]
 
     # Simple check for static
     for path in exempt_paths:
@@ -742,7 +1425,11 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
 
     # Allow localhost bypass for WebSocket
     client_host = websocket.client.host
-    is_localhost = client_host in ("127.0.0.1", "localhost")
+    is_localhost = client_host == "127.0.0.1" or client_host == "localhost"
+
+    if token != expected_token and not is_localhost:
+        await websocket.close(code=4003, reason="Unauthorized")
+        return
 
     # Accept connection first — token can arrive via first message
     if token == expected_token or is_localhost:
@@ -767,18 +1454,54 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
     # Track connection
     active_connections.append(websocket)
 
-    # Generate session ID for Nanobot bus
+    # Generate session ID for bus (or resume existing)
     chat_id = str(uuid.uuid4())
+
+    # Resume session if requested
+    resumed = False
+    if resume_session:
+        # Parse safe_key to extract channel and raw UUID
+        parts = resume_session.split("_", 1)
+        if len(parts) == 2 and parts[0] == "websocket":
+            raw_id = parts[1]
+            session_key = f"websocket:{raw_id}"
+            # Verify session file exists
+            session_file = (
+                Path.home() / ".pocketclaw" / "memory" / "sessions" / f"{resume_session}.json"
+            )
+            if session_file.exists():
+                chat_id = raw_id
+                resumed = True
+
     await ws_adapter.register_connection(websocket, chat_id)
+
+    # Build session safe_key for frontend
+    safe_key = f"websocket_{chat_id}"
 
     # Send welcome notification with session info
     await websocket.send_json(
         {
             "type": "connection_info",
-            "content": "👋 Connected to PocketPaw (Nanobot V2)",
-            "id": chat_id,
+            "content": "Connected to PocketPaw",
+            "id": safe_key,
         }
     )
+
+    # If resuming, send session history
+    if resumed:
+        session_key = f"websocket:{chat_id}"
+        try:
+            manager = get_memory_manager()
+            history = await manager.get_session_history(session_key, limit=100)
+            await websocket.send_json(
+                {
+                    "type": "session_history",
+                    "session_id": safe_key,
+                    "messages": history,
+                }
+            )
+        except Exception as e:
+            logger.warning("Failed to load session history for resume: %s", e)
 
     # Load settings
     settings = Settings.load()
@@ -791,7 +1514,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
             data = await websocket.receive_json()
             action = data.get("action")
 
-            # Handle chat via MessageBus (Nanobot)
+            # Handle chat via MessageBus
             if action == "chat":
                 log_msg = f"⚡ Processing message with Backend: {settings.agent_backend} (Provider: {settings.llm_provider})"
                 logger.warning(log_msg)  # Use WARNING to ensure it shows up
@@ -802,6 +1525,46 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
                 # But allow fallback to old router if 'agent_active' is toggled specifically for old behavior?
                 # Actually, let's treat 'chat' as input to the Bus.
                 await ws_adapter.handle_message(chat_id, data)
+
+            # Session switching
+            elif action == "switch_session":
+                session_id = data.get("session_id", "")
+                # Parse safe_key: "websocket_<uuid>"
+                parts = session_id.split("_", 1)
+                if len(parts) == 2:
+                    channel_prefix = parts[0]
+                    raw_id = parts[1]
+                    new_session_key = f"{channel_prefix}:{raw_id}"
+
+                    # Unregister old connection, register with new chat_id
+                    await ws_adapter.unregister_connection(chat_id)
+                    chat_id = raw_id
+                    await ws_adapter.register_connection(websocket, chat_id)
+
+                    # Load and send history
+                    try:
+                        manager = get_memory_manager()
+                        history = await manager.get_session_history(new_session_key, limit=100)
+                        await websocket.send_json(
+                            {
+                                "type": "session_history",
+                                "session_id": session_id,
+                                "messages": history,
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to load session history: %s", e)
+                        await websocket.send_json(
+                            {"type": "session_history", "session_id": session_id, "messages": []}
+                        )
+
+            # New session
+            elif action == "new_session":
+                await ws_adapter.unregister_connection(chat_id)
+                chat_id = str(uuid.uuid4())
+                await ws_adapter.register_connection(websocket, chat_id)
+                safe_key = f"websocket_{chat_id}"
+                await websocket.send_json({"type": "new_session", "id": safe_key})
 
             # Legacy/Other actions
             elif action == "tool":
@@ -828,10 +1591,72 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
                     settings.anthropic_model = data.get("anthropic_model")
                 if "bypass_permissions" in data:
                     settings.bypass_permissions = bool(data.get("bypass_permissions"))
+                if data.get("web_search_provider"):
+                    settings.web_search_provider = data["web_search_provider"]
+                if data.get("url_extract_provider"):
+                    settings.url_extract_provider = data["url_extract_provider"]
+                if "injection_scan_enabled" in data:
+                    settings.injection_scan_enabled = bool(data["injection_scan_enabled"])
+                if "injection_scan_llm" in data:
+                    settings.injection_scan_llm = bool(data["injection_scan_llm"])
+                if data.get("tool_profile"):
+                    settings.tool_profile = data["tool_profile"]
+                if "plan_mode" in data:
+                    settings.plan_mode = bool(data["plan_mode"])
+                if "plan_mode_tools" in data:
+                    raw = data["plan_mode_tools"]
+                    if isinstance(raw, str):
+                        settings.plan_mode_tools = [t.strip() for t in raw.split(",") if t.strip()]
+                    elif isinstance(raw, list):
+                        settings.plan_mode_tools = raw
+                if "smart_routing_enabled" in data:
+                    settings.smart_routing_enabled = bool(data["smart_routing_enabled"])
+                if data.get("model_tier_simple"):
+                    settings.model_tier_simple = data["model_tier_simple"]
+                if data.get("model_tier_moderate"):
+                    settings.model_tier_moderate = data["model_tier_moderate"]
+                if data.get("model_tier_complex"):
+                    settings.model_tier_complex = data["model_tier_complex"]
+                if data.get("tts_provider"):
+                    settings.tts_provider = data["tts_provider"]
+                if "tts_voice" in data:
+                    settings.tts_voice = data["tts_voice"]
+                if data.get("stt_model"):
+                    settings.stt_model = data["stt_model"]
+                if "self_audit_enabled" in data:
+                    settings.self_audit_enabled = bool(data["self_audit_enabled"])
+                if data.get("self_audit_schedule"):
+                    settings.self_audit_schedule = data["self_audit_schedule"]
+                # Memory settings
+                if data.get("memory_backend"):
+                    settings.memory_backend = data["memory_backend"]
+                if "mem0_auto_learn" in data:
+                    settings.mem0_auto_learn = bool(data["mem0_auto_learn"])
+                if data.get("mem0_llm_provider"):
+                    settings.mem0_llm_provider = data["mem0_llm_provider"]
+                if data.get("mem0_llm_model"):
+                    settings.mem0_llm_model = data["mem0_llm_model"]
+                if data.get("mem0_embedder_provider"):
+                    settings.mem0_embedder_provider = data["mem0_embedder_provider"]
+                if data.get("mem0_embedder_model"):
+                    settings.mem0_embedder_model = data["mem0_embedder_model"]
+                if data.get("mem0_vector_store"):
+                    settings.mem0_vector_store = data["mem0_vector_store"]
+                if data.get("mem0_ollama_base_url"):
+                    settings.mem0_ollama_base_url = data["mem0_ollama_base_url"]
                 settings.save()
 
                 # Reset the agent loop's router to pick up new settings
                 agent_loop.reset_router()
+
+                # Clear settings cache so memory manager picks up new values
+                from pocketclaw.config import get_settings as _get_settings
+
+                _get_settings.cache_clear()
+
+                # Reload memory manager with fresh settings
+                agent_loop.memory = get_memory_manager(force_reload=True)
+                agent_loop.context_builder.memory = agent_loop.memory
 
                 await websocket.send_json({"type": "message", "content": "⚙️ Settings updated"})
 
@@ -855,6 +1680,60 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
                     settings.save()
                     await websocket.send_json(
                         {"type": "message", "content": "✅ OpenAI API key saved!"}
+                    )
+                elif provider == "tavily" and key:
+                    settings.tavily_api_key = key
+                    settings.save()
+                    await websocket.send_json(
+                        {"type": "message", "content": "✅ Tavily API key saved!"}
+                    )
+                elif provider == "brave" and key:
+                    settings.brave_search_api_key = key
+                    settings.save()
+                    await websocket.send_json(
+                        {"type": "message", "content": "✅ Brave Search API key saved!"}
+                    )
+                elif provider == "parallel" and key:
+                    settings.parallel_api_key = key
+                    settings.save()
+                    await websocket.send_json(
+                        {"type": "message", "content": "✅ Parallel AI API key saved!"}
+                    )
+                elif provider == "elevenlabs" and key:
+                    settings.elevenlabs_api_key = key
+                    settings.save()
+                    await websocket.send_json(
+                        {"type": "message", "content": "✅ ElevenLabs API key saved!"}
+                    )
+                elif provider == "google_oauth_id" and key:
+                    settings.google_oauth_client_id = key
+                    settings.save()
+                    await websocket.send_json(
+                        {"type": "message", "content": "✅ Google OAuth Client ID saved!"}
+                    )
+                elif provider == "google_oauth_secret" and key:
+                    settings.google_oauth_client_secret = key
+                    settings.save()
+                    await websocket.send_json(
+                        {
+                            "type": "message",
+                            "content": "✅ Google OAuth Client Secret saved!",
+                        }
+                    )
+                elif provider == "spotify_client_id" and key:
+                    settings.spotify_client_id = key
+                    settings.save()
+                    await websocket.send_json(
+                        {"type": "message", "content": "✅ Spotify Client ID saved!"}
+                    )
+                elif provider == "spotify_client_secret" and key:
+                    settings.spotify_client_secret = key
+                    settings.save()
+                    await websocket.send_json(
+                        {
+                            "type": "message",
+                            "content": "✅ Spotify Client Secret saved!",
+                        }
                     )
                 else:
                     await websocket.send_json(
@@ -881,6 +1760,38 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
                             "bypassPermissions": settings.bypass_permissions,
                             "hasAnthropicKey": bool(settings.anthropic_api_key),
                             "hasOpenaiKey": bool(settings.openai_api_key),
+                            "webSearchProvider": settings.web_search_provider,
+                            "urlExtractProvider": settings.url_extract_provider,
+                            "hasTavilyKey": bool(settings.tavily_api_key),
+                            "hasBraveKey": bool(settings.brave_search_api_key),
+                            "hasParallelKey": bool(settings.parallel_api_key),
+                            "injectionScanEnabled": settings.injection_scan_enabled,
+                            "injectionScanLlm": settings.injection_scan_llm,
+                            "toolProfile": settings.tool_profile,
+                            "planMode": settings.plan_mode,
+                            "planModeTools": ",".join(settings.plan_mode_tools),
+                            "smartRoutingEnabled": settings.smart_routing_enabled,
+                            "modelTierSimple": settings.model_tier_simple,
+                            "modelTierModerate": settings.model_tier_moderate,
+                            "modelTierComplex": settings.model_tier_complex,
+                            "ttsProvider": settings.tts_provider,
+                            "ttsVoice": settings.tts_voice,
+                            "sttModel": settings.stt_model,
+                            "selfAuditEnabled": settings.self_audit_enabled,
+                            "selfAuditSchedule": settings.self_audit_schedule,
+                            "memoryBackend": settings.memory_backend,
+                            "mem0AutoLearn": settings.mem0_auto_learn,
+                            "mem0LlmProvider": settings.mem0_llm_provider,
+                            "mem0LlmModel": settings.mem0_llm_model,
+                            "mem0EmbedderProvider": settings.mem0_embedder_provider,
+                            "mem0EmbedderModel": settings.mem0_embedder_model,
+                            "mem0VectorStore": settings.mem0_vector_store,
+                            "mem0OllamaBaseUrl": settings.mem0_ollama_base_url,
+                            "hasElevenlabsKey": bool(settings.elevenlabs_api_key),
+                            "hasGoogleOAuthId": bool(settings.google_oauth_client_id),
+                            "hasGoogleOAuthSecret": bool(settings.google_oauth_client_secret),
+                            "hasSpotifyClientId": bool(settings.spotify_client_id),
+                            "hasSpotifyClientSecret": bool(settings.spotify_client_secret),
                             "agentActive": agent_active,
                             "agentStatus": agent_status,
                         },
@@ -996,6 +1907,34 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(Non
                 else:
                     await websocket.send_json({"type": "error", "content": "Intention not found"})
 
+            # ==================== Plan Mode API ====================
+
+            elif action == "approve_plan":
+                from pocketclaw.agents.plan_mode import get_plan_manager
+
+                pm = get_plan_manager()
+                session_key = data.get("session_key", "")
+                plan = pm.approve_plan(session_key)
+                if plan:
+                    await websocket.send_json({"type": "plan_approved", "session_key": session_key})
+                else:
+                    await websocket.send_json(
+                        {"type": "error", "content": "No active plan to approve"}
+                    )
+
+            elif action == "reject_plan":
+                from pocketclaw.agents.plan_mode import get_plan_manager
+
+                pm = get_plan_manager()
+                session_key = data.get("session_key", "")
+                plan = pm.reject_plan(session_key)
+                if plan:
+                    await websocket.send_json({"type": "plan_rejected", "session_key": session_key})
+                else:
+                    await websocket.send_json(
+                        {"type": "error", "content": "No active plan to reject"}
+                    )
+
             # ==================== Skills API ====================
 
             elif action == "get_skills":
@@ -1064,45 +2003,155 @@ async def get_identity():
     }
 
 
+@app.get("/api/sessions")
+async def list_sessions_v2(limit: int = 50):
+    """List sessions using the fast session index."""
+    manager = get_memory_manager()
+    store = manager._store
+
+    if hasattr(store, "_load_session_index"):
+        index = store._load_session_index()
+        # Sort by last_activity descending
+        entries = sorted(
+            index.items(),
+            key=lambda kv: kv[1].get("last_activity", ""),
+            reverse=True,
+        )[:limit]
+        sessions = []
+        for safe_key, meta in entries:
+            sessions.append({"id": safe_key, **meta})
+        return {"sessions": sessions, "total": len(index)}
+
+    # Fallback for non-file stores
+    return {"sessions": [], "total": 0}
+
+
 @app.get("/api/memory/sessions")
 async def list_sessions(limit: int = 20):
-    """List all available sessions with metadata."""
+    """List all available sessions with metadata (legacy endpoint)."""
+    result = await list_sessions_v2(limit=limit)
+    return result.get("sessions", [])
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session by ID."""
+    manager = get_memory_manager()
+    store = manager._store
+
+    if hasattr(store, "delete_session"):
+        deleted = store.delete_session(session_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"status": "ok"}
+
+    raise HTTPException(status_code=501, detail="Store does not support session deletion")
+
+
+@app.post("/api/sessions/{session_id}/title")
+async def update_session_title(session_id: str, request: Request):
+    """Update the title of a session."""
+    data = await request.json()
+    title = data.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    manager = get_memory_manager()
+    store = manager._store
+
+    if hasattr(store, "update_session_title"):
+        updated = store.update_session_title(session_id, title)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"status": "ok"}
+
+    raise HTTPException(status_code=501, detail="Store does not support title updates")
+
+
+@app.get("/api/sessions/search")
+async def search_sessions(q: str = Query(""), limit: int = 20):
+    """Search sessions by content."""
     import json
-    from pathlib import Path
 
-    sessions_path = Path.home() / ".pocketclaw" / "memory" / "sessions"
+    if not q.strip():
+        return {"sessions": []}
 
-    if not sessions_path.exists():
-        return []
+    query_lower = q.lower()
+    manager = get_memory_manager()
+    store = manager._store
 
-    sessions = []
-    for session_file in sorted(
-        sessions_path.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
-    ):
-        if len(sessions) >= limit:
-            break
+    if not hasattr(store, "sessions_path"):
+        return {"sessions": []}
 
+    results = []
+    index = store._load_session_index() if hasattr(store, "_load_session_index") else {}
+
+    for session_file in store.sessions_path.glob("*.json"):
+        if session_file.name.startswith("_") or session_file.name.endswith("_compaction.json"):
+            continue
         try:
             data = json.loads(session_file.read_text())
-            if data:
-                # Get first and last message for preview
-                first_msg = data[0] if data else {}
-                last_msg = data[-1] if data else {}
-
-                sessions.append(
-                    {
-                        "id": session_file.stem,  # Remove .json extension
-                        "message_count": len(data),
-                        "first_message": first_msg.get("content", "")[:100],
-                        "last_message": last_msg.get("content", "")[:100],
-                        "updated_at": last_msg.get("timestamp", ""),
-                        "created_at": first_msg.get("timestamp", ""),
-                    }
-                )
-        except (json.JSONDecodeError, KeyError):
+            for msg in data:
+                if query_lower in msg.get("content", "").lower():
+                    safe_key = session_file.stem
+                    meta = index.get(safe_key, {})
+                    results.append(
+                        {
+                            "id": safe_key,
+                            "title": meta.get("title", "Untitled"),
+                            "channel": meta.get("channel", "unknown"),
+                            "match": msg["content"][:200],
+                            "match_role": msg.get("role", ""),
+                            "last_activity": meta.get("last_activity", ""),
+                        }
+                    )
+                    break
+        except (json.JSONDecodeError, OSError):
             continue
+        if len(results) >= limit:
+            break
 
-    return sessions
+    return {"sessions": results}
+
+
+@app.get("/api/sessions/recent")
+async def list_recent_sessions(limit: int = 20):
+    """List recent sessions with last 2 messages for inbox preview."""
+    import json
+
+    manager = get_memory_manager()
+    store = manager._store
+
+    if not hasattr(store, "_load_session_index"):
+        return {"sessions": []}
+
+    index = store._load_session_index()
+    entries = sorted(
+        index.items(),
+        key=lambda kv: kv[1].get("last_activity", ""),
+        reverse=True,
+    )[:limit]
+
+    sessions = []
+    for safe_key, meta in entries:
+        session_file = store.sessions_path / f"{safe_key}.json"
+        last_messages = []
+        if session_file.exists():
+            try:
+                data = json.loads(session_file.read_text())
+                for msg in data[-2:]:
+                    last_messages.append(
+                        {
+                            "role": msg.get("role", ""),
+                            "content": msg.get("content", "")[:200],
+                            "timestamp": msg.get("timestamp", ""),
+                        }
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass
+        sessions.append({"id": safe_key, **meta, "last_messages": last_messages})
+
+    return {"sessions": sessions}
 
 
 @app.get("/api/memory/session")
@@ -1275,12 +2324,108 @@ async def handle_file_browse(websocket: WebSocket, path: str, settings: Settings
     await websocket.send_json({"type": "files", "path": display_path, "files": files})
 
 
-def run_dashboard(host: str = "127.0.0.1", port: int = 8888):
+# =========================================================================
+# Memory Settings API
+# =========================================================================
+
+_MEMORY_CONFIG_KEYS = {
+    "memory_backend": "memory_backend",
+    "memory_use_inference": "memory_use_inference",
+    "mem0_llm_provider": "mem0_llm_provider",
+    "mem0_llm_model": "mem0_llm_model",
+    "mem0_embedder_provider": "mem0_embedder_provider",
+    "mem0_embedder_model": "mem0_embedder_model",
+    "mem0_vector_store": "mem0_vector_store",
+    "mem0_ollama_base_url": "mem0_ollama_base_url",
+    "mem0_auto_learn": "mem0_auto_learn",
+}
+
+
+@app.get("/api/memory/settings")
+async def get_memory_settings():
+    """Get current memory backend configuration."""
+    settings = Settings.load()
+    return {
+        "memory_backend": settings.memory_backend,
+        "memory_use_inference": settings.memory_use_inference,
+        "mem0_llm_provider": settings.mem0_llm_provider,
+        "mem0_llm_model": settings.mem0_llm_model,
+        "mem0_embedder_provider": settings.mem0_embedder_provider,
+        "mem0_embedder_model": settings.mem0_embedder_model,
+        "mem0_vector_store": settings.mem0_vector_store,
+        "mem0_ollama_base_url": settings.mem0_ollama_base_url,
+        "mem0_auto_learn": settings.mem0_auto_learn,
+    }
+
+
+@app.post("/api/memory/settings")
+async def save_memory_settings(request: Request):
+    """Save memory backend configuration."""
+    data = await request.json()
+    settings = Settings.load()
+
+    for key, value in data.items():
+        settings_field = _MEMORY_CONFIG_KEYS.get(key)
+        if settings_field:
+            setattr(settings, settings_field, value)
+
+    settings.save()
+
+    # Clear settings cache so memory manager picks up new values
+    from pocketclaw.config import get_settings as _get_settings
+
+    _get_settings.cache_clear()
+
+    # Force reload the memory manager with fresh settings
+    from pocketclaw.memory import get_memory_manager
+
+    manager = get_memory_manager(force_reload=True)
+    agent_loop.memory = manager
+    agent_loop.context_builder.memory = manager
+
+    return {"status": "ok"}
+
+
+@app.get("/api/memory/stats")
+async def get_memory_stats():
+    """Get memory backend statistics."""
+    manager = get_memory_manager()
+    store = manager._store
+
+    if hasattr(store, "get_memory_stats"):
+        return await store.get_memory_stats()
+
+    # File backend basic stats
+    return {
+        "backend": "file",
+        "total_memories": "N/A (use mem0 for stats)",
+    }
+
+
+def run_dashboard(host: str = "127.0.0.1", port: int = 8888, open_browser: bool = True):
     """Run the dashboard server."""
+    global _open_browser_url
+
     print("\n" + "=" * 50)
     print("🐾 POCKETPAW WEB DASHBOARD")
     print("=" * 50)
-    print(f"\n🌐 Open http://localhost:{port} in your browser\n")
+    if host == "0.0.0.0":
+        import socket
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "<your-server-ip>"
+        print(f"\n🌐 Open http://{local_ip}:{port} in your browser")
+        print(f"   (listening on all interfaces — {host}:{port})\n")
+    else:
+        print(f"\n🌐 Open http://localhost:{port} in your browser\n")
+
+    if open_browser:
+        _open_browser_url = f"http://localhost:{port}"
 
     uvicorn.run(app, host=host, port=port)
 

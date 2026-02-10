@@ -1,6 +1,6 @@
 # Tests for Bootstrap System
 # Created: 2026-02-02
-# Part of Nanobot Pattern Adoption
+
 
 import pytest
 import tempfile

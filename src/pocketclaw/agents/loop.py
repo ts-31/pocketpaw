@@ -1,6 +1,5 @@
 """Unified Agent Loop.
 Created: 2026-02-02
-Part of Nanobot Pattern Adoption.
 Changes:
   - Added BrowserTool registration
   - 2026-02-05: Refactored to use AgentRouter for all backends.
@@ -17,13 +16,14 @@ It replaces the old highly-coupled bot loops.
 
 import asyncio
 import logging
-from typing import Any
 
-from pocketclaw.config import get_settings, Settings
-from pocketclaw.bus import get_message_bus, InboundMessage, OutboundMessage, Channel, SystemEvent
-from pocketclaw.memory import get_memory_manager
-from pocketclaw.bootstrap import AgentContextBuilder
 from pocketclaw.agents.router import AgentRouter
+from pocketclaw.bootstrap import AgentContextBuilder
+from pocketclaw.bus import InboundMessage, OutboundMessage, SystemEvent, get_message_bus
+from pocketclaw.bus.events import Channel
+from pocketclaw.config import Settings, get_settings
+from pocketclaw.memory import get_memory_manager
+from pocketclaw.security.injection_scanner import ThreatLevel, get_injection_scanner
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,10 @@ class AgentLoop:
 
         # Agent Router handles backend selection
         self._router: AgentRouter | None = None
+
+        # Concurrency controls
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._global_semaphore = asyncio.Semaphore(self.settings.max_concurrent_conversations)
 
         self._running = False
 
@@ -84,16 +88,83 @@ class AgentLoop:
         session_key = message.session_key
         logger.info(f"⚡ Processing message from {session_key}")
 
+        # Global concurrency limit — blocks until a slot is available
+        async with self._global_semaphore:
+            # Per-session lock — serializes messages within the same session
+            if session_key not in self._session_locks:
+                self._session_locks[session_key] = asyncio.Lock()
+            async with self._session_locks[session_key]:
+                await self._process_message_inner(message, session_key)
+
+    async def _process_message_inner(self, message: InboundMessage, session_key: str) -> None:
+        """Inner message processing (called under concurrency guards)."""
+        # Keep context_builder in sync if memory manager was hot-reloaded
+        if self.context_builder.memory is not self.memory:
+            self.context_builder.memory = self.memory
+
         try:
+            # 0. Injection scan for non-owner sources
+            content = message.content
+            if self.settings.injection_scan_enabled:
+                scanner = get_injection_scanner()
+                source = message.metadata.get("source", message.channel.value)
+                scan_result = scanner.scan(content, source=source)
+
+                if scan_result.threat_level == ThreatLevel.HIGH:
+                    if self.settings.injection_scan_llm:
+                        scan_result = await scanner.deep_scan(content, source=source)
+
+                    if scan_result.threat_level == ThreatLevel.HIGH:
+                        logger.warning(
+                            "Blocked HIGH threat injection from %s: %s",
+                            source,
+                            scan_result.matched_patterns,
+                        )
+                        await self.bus.publish_system(
+                            SystemEvent(
+                                event_type="error",
+                                data={
+                                    "message": "Message blocked by injection scanner",
+                                    "patterns": scan_result.matched_patterns,
+                                },
+                            )
+                        )
+                        await self.bus.publish_outbound(
+                            OutboundMessage(
+                                channel=message.channel,
+                                chat_id=message.chat_id,
+                                content=(
+                                    "Your message was flagged by the security scanner and blocked."
+                                ),
+                            )
+                        )
+                        return
+
+                # Wrap suspicious (non-blocked) content with sanitization markers
+                if scan_result.threat_level != ThreatLevel.NONE:
+                    content = scan_result.sanitized_content
+
             # 1. Store User Message
             await self.memory.add_to_session(
                 session_key=session_key,
                 role="user",
-                content=message.content,
+                content=content,
                 metadata=message.metadata,
             )
 
-            # 2. Emit thinking event
+            # 2. Build dynamic system prompt (identity + memory context)
+            system_prompt = await self.context_builder.build_system_prompt(user_query=content)
+
+            # 2a. Retrieve session history with compaction
+            history = await self.memory.get_compacted_history(
+                session_key,
+                recent_window=self.settings.compaction_recent_window,
+                char_budget=self.settings.compaction_char_budget,
+                summary_chars=self.settings.compaction_summary_chars,
+                llm_summarize=self.settings.compaction_llm_summarize,
+            )
+
+            # 2b. Emit thinking event
             await self.bus.publish_system(
                 SystemEvent(event_type="thinking", data={"session_key": session_key})
             )
@@ -102,7 +173,7 @@ class AgentLoop:
             router = self._get_router()
             full_response = ""
 
-            async for chunk in router.run(message.content):
+            async for chunk in router.run(content, system_prompt=system_prompt, history=history):
                 chunk_type = chunk.get("type", "")
                 content = chunk.get("content", "")
                 metadata = chunk.get("metadata") or {}
@@ -164,6 +235,23 @@ class AgentLoop:
                         )
                     )
 
+                elif chunk_type == "thinking":
+                    # Thinking goes to Activity panel only — NOT to OutboundMessage
+                    await self.bus.publish_system(
+                        SystemEvent(
+                            event_type="thinking",
+                            data={"content": content, "session_key": session_key},
+                        )
+                    )
+
+                elif chunk_type == "thinking_done":
+                    await self.bus.publish_system(
+                        SystemEvent(
+                            event_type="thinking_done",
+                            data={"session_key": session_key},
+                        )
+                    )
+
                 elif chunk_type == "tool_use":
                     # Emit tool_start system event for Activity panel
                     tool_name = metadata.get("name") or metadata.get("tool", "unknown")
@@ -222,6 +310,28 @@ class AgentLoop:
                     session_key=session_key, role="assistant", content=full_response
                 )
 
+                # Notify inbox for cross-channel updates
+                if message.channel != Channel.WEBSOCKET:
+                    await self.bus.publish_system(
+                        SystemEvent(
+                            event_type="inbox_update",
+                            data={
+                                "channel": message.channel.value,
+                                "session_key": session_key,
+                                "preview": full_response[:120],
+                            },
+                        )
+                    )
+
+                # 6. Auto-learn: extract facts from conversation (non-blocking)
+                should_auto_learn = (
+                    self.settings.memory_backend == "mem0" and self.settings.mem0_auto_learn
+                ) or (self.settings.memory_backend == "file" and self.settings.file_auto_learn)
+                if should_auto_learn:
+                    asyncio.create_task(
+                        self._auto_learn(message.content, full_response, session_key)
+                    )
+
         except Exception as e:
             logger.exception(f"❌ Error processing message: {e}")
             # Send error message
@@ -244,6 +354,22 @@ class AgentLoop:
         await self.bus.publish_outbound(
             OutboundMessage(channel=original.channel, chat_id=original.chat_id, content=content)
         )
+
+    async def _auto_learn(self, user_msg: str, assistant_msg: str, session_key: str) -> None:
+        """Background task: feed conversation turn for fact extraction."""
+        try:
+            messages = [
+                {"role": "user", "content": user_msg},
+                {"role": "assistant", "content": assistant_msg},
+            ]
+            result = await self.memory.auto_learn(
+                messages, file_auto_learn=self.settings.file_auto_learn
+            )
+            extracted = len(result.get("results", []))
+            if extracted:
+                logger.debug("Auto-learned %d facts from %s", extracted, session_key)
+        except Exception:
+            logger.debug("Auto-learn background task failed", exc_info=True)
 
     def reset_router(self) -> None:
         """Reset the router to pick up new settings."""

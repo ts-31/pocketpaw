@@ -1,0 +1,86 @@
+<!--
+  PocketPaw Dashboard - Unified Inbox Component
+
+  Created: 2026-02-10
+  Cross-channel session inbox with recent activity cards.
+-->
+<div x-show="view === 'inbox'" class="flex-1 overflow-hidden relative pt-20 pb-4 px-4 md:px-8">
+  <div class="h-full overflow-y-auto" style="scrollbar-width: thin;">
+    <!-- Header -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-white">Inbox</h2>
+      <p class="text-sm text-white/40 mt-1">Recent conversations across all channels</p>
+    </div>
+
+    <!-- Empty state -->
+    <template x-if="recentSessions.length === 0">
+      <div class="flex flex-col items-center justify-center py-16 text-white/30">
+        <i data-lucide="inbox" class="w-12 h-12 opacity-30 mb-3"></i>
+        <span class="text-sm">No recent conversations</span>
+      </div>
+    </template>
+
+    <!-- Session cards -->
+    <div class="grid gap-3 max-w-3xl">
+      <template x-for="session in recentSessions" :key="session.id">
+        <button
+            class="w-full text-left p-4 rounded-xl bg-white/5 hover:bg-white/8 border border-white/8 hover:border-white/15 transition-all group"
+            @click="selectSession(session.id); view = 'chat'"
+        >
+          <div class="flex items-start gap-3">
+            <!-- Channel badge -->
+            <div class="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
+                 :class="{
+                     'bg-accent/20 text-accent': session.channel === 'websocket',
+                     'bg-[#5865F2]/20 text-[#5865F2]': session.channel === 'discord',
+                     'bg-[#4A154B]/20 text-[#E01E5A]': session.channel === 'slack',
+                     'bg-[#25D366]/20 text-[#25D366]': session.channel === 'whatsapp',
+                     'bg-[#0088cc]/20 text-[#0088cc]': session.channel === 'telegram',
+                     'bg-white/10 text-white/60': !['websocket','discord','slack','whatsapp','telegram'].includes(session.channel)
+                 }"
+            >
+              <i :data-lucide="getChannelIcon(session.channel)" class="w-4 h-4"></i>
+            </div>
+
+            <div class="flex-1 min-w-0">
+              <!-- Title + timestamp -->
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <span class="text-sm font-medium text-white truncate" x-text="session.title || 'New Chat'"></span>
+                <span class="text-[11px] text-white/30 shrink-0" x-text="session.last_activity ? new Date(session.last_activity).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : ''"></span>
+              </div>
+
+              <!-- Last messages preview -->
+              <template x-if="session.last_messages && session.last_messages.length > 0">
+                <div class="space-y-1">
+                  <template x-for="(msg, idx) in session.last_messages" :key="idx">
+                    <div class="flex items-start gap-1.5">
+                      <span class="text-[10px] uppercase font-medium shrink-0 mt-0.5"
+                            :class="msg.role === 'user' ? 'text-accent' : 'text-success'"
+                            x-text="msg.role === 'user' ? 'You' : 'AI'"></span>
+                      <span class="text-xs text-white/40 truncate" x-text="msg.content"></span>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!session.last_messages || session.last_messages.length === 0">
+                <p class="text-xs text-white/30 truncate" x-text="session.preview || 'No messages'"></p>
+              </template>
+
+              <!-- Meta -->
+              <div class="flex items-center gap-3 mt-2">
+                <span class="text-[10px] text-white/20" x-text="session.message_count + ' messages'"></span>
+                <span class="text-[10px] text-white/20 capitalize" x-text="session.channel"></span>
+              </div>
+            </div>
+
+            <!-- Arrow -->
+            <i data-lucide="chevron-right" class="w-4 h-4 text-white/20 group-hover:text-white/40 shrink-0 mt-1 transition-colors"></i>
+          </div>
+        </button>
+      </template>
+    </div>
+
+    <!-- Refresh icons -->
+    <div x-effect="recentSessions.length; $nextTick(() => { if (window.refreshIcons) window.refreshIcons(); })"></div>
+  </div>
+</div>
