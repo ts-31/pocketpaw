@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from pocketclaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
+from pocketclaw.bus.format import convert_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ class SlackAdapter(BaseChannelAdapter):
             # Normal message
             kwargs: dict[str, Any] = {
                 "channel": message.chat_id,
-                "text": message.content,
+                "text": convert_markdown(message.content, self.channel),
             }
             thread_ts = message.metadata.get("thread_ts")
             if thread_ts:
@@ -190,7 +191,7 @@ class SlackAdapter(BaseChannelAdapter):
         buf = self._buffers.get(chat_id)
         if not buf:
             return
-        text = buf["text"]
+        text = convert_markdown(buf["text"], self.channel)
         if not text.strip():
             return
         try:

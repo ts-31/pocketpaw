@@ -8,6 +8,7 @@ import logging
 import httpx
 
 from pocketclaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
+from pocketclaw.bus.format import convert_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,7 @@ class WhatsAppAdapter(BaseChannelAdapter):
         """Send a text message via the WhatsApp Cloud API."""
         if not self._http:
             return
+        text = convert_markdown(text, self.channel)
         url = f"{WHATSAPP_API_BASE}/{self.phone_number_id}/messages"
         resp = await self._http.post(
             url,

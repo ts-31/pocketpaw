@@ -15,6 +15,7 @@ import logging
 import httpx
 
 from pocketclaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
+from pocketclaw.bus.format import convert_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ class SignalAdapter(BaseChannelAdapter):
         """Send a text message via signal-cli REST API."""
         if not self._http:
             return
+        text = convert_markdown(text, self.channel)
         url = f"{self.api_url}/v2/send"
         resp = await self._http.post(
             url,

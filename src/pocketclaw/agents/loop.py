@@ -152,8 +152,10 @@ class AgentLoop:
                 metadata=message.metadata,
             )
 
-            # 2. Build dynamic system prompt (identity + memory context)
-            system_prompt = await self.context_builder.build_system_prompt(user_query=content)
+            # 2. Build dynamic system prompt (identity + memory context + channel hint)
+            system_prompt = await self.context_builder.build_system_prompt(
+                user_query=content, channel=message.channel
+            )
 
             # 2a. Retrieve session history with compaction
             history = await self.memory.get_compacted_history(
@@ -309,19 +311,6 @@ class AgentLoop:
                 await self.memory.add_to_session(
                     session_key=session_key, role="assistant", content=full_response
                 )
-
-                # Notify inbox for cross-channel updates
-                if message.channel != Channel.WEBSOCKET:
-                    await self.bus.publish_system(
-                        SystemEvent(
-                            event_type="inbox_update",
-                            data={
-                                "channel": message.channel.value,
-                                "session_key": session_key,
-                                "preview": full_response[:120],
-                            },
-                        )
-                    )
 
                 # 6. Auto-learn: extract facts from conversation (non-blocking)
                 should_auto_learn = (

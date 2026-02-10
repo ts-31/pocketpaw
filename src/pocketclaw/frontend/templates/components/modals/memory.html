@@ -77,17 +77,17 @@
                                     <span class="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded" x-text="session.message_count + ' msgs'"></span>
                                 </div>
                                 <p class="text-[12px] text-white/70 line-clamp-2" x-text="session.first_message || 'Empty session'"></p>
-                                <p class="text-[10px] text-white/30 mt-1" x-text="formatDate(session.updated_at)"></p>
+                                <p class="text-[10px] text-white/50 mt-1" x-text="formatDate(session.updated_at)"></p>
                             </button>
                         </template>
-                        <div x-show="sessionsList.length === 0" class="p-6 text-center text-white/30 text-[13px] italic">
+                        <div x-show="sessionsList.length === 0" class="p-6 text-center text-white/50 text-[13px] italic">
                             No sessions yet
                         </div>
                     </div>
 
                     <!-- Session Messages -->
                     <div class="w-2/3 bg-black/20 rounded-xl border border-[var(--glass-border)] p-4 max-h-[400px] overflow-y-auto">
-                        <div x-show="!selectedSession" class="p-8 text-center text-white/30 text-[14px]">
+                        <div x-show="!selectedSession" class="p-8 text-center text-white/50 text-[14px]">
                             <i data-lucide="message-square" class="w-8 h-8 mx-auto mb-3 opacity-30"></i>
                             Select a session to view messages
                         </div>
@@ -120,7 +120,7 @@
                             type="text"
                             x-model="memorySearch"
                             placeholder="Search memories..."
-                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[12px] py-3 pl-11 pr-4 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[12px] py-3 pl-11 pr-4 text-[14px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40"
                         >
                     </div>
 
@@ -156,10 +156,10 @@
                                 </div>
                             </div>
                         </template>
-                        <div x-show="longTermMemory.length === 0" class="p-12 text-center text-white/30">
+                        <div x-show="longTermMemory.length === 0" class="p-12 text-center text-white/50">
                             <i data-lucide="bookmark" class="w-8 h-8 mx-auto mb-3 opacity-30"></i>
                             <p class="text-[14px] italic">No long-term memories yet</p>
-                            <p class="text-[12px] mt-2 text-white/20">Ask me to "remember" something to save it here</p>
+                            <p class="text-[12px] mt-2 text-white/50">Ask me to "remember" something to save it here</p>
                         </div>
                     </div>
                 </div>

@@ -1430,7 +1430,11 @@ async def get_telegram_pairing_status():
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str | None = Query(None)):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: str | None = Query(None),
+    resume_session: str | None = Query(None),
+):
     """WebSocket endpoint for real-time communication.
 
     Auth: accepts token via query param (legacy) OR first message (preferred).
@@ -2127,46 +2131,6 @@ async def search_sessions(q: str = Query(""), limit: int = 20):
             break
 
     return {"sessions": results}
-
-
-@app.get("/api/sessions/recent")
-async def list_recent_sessions(limit: int = 20):
-    """List recent sessions with last 2 messages for inbox preview."""
-    import json
-
-    manager = get_memory_manager()
-    store = manager._store
-
-    if not hasattr(store, "_load_session_index"):
-        return {"sessions": []}
-
-    index = store._load_session_index()
-    entries = sorted(
-        index.items(),
-        key=lambda kv: kv[1].get("last_activity", ""),
-        reverse=True,
-    )[:limit]
-
-    sessions = []
-    for safe_key, meta in entries:
-        session_file = store.sessions_path / f"{safe_key}.json"
-        last_messages = []
-        if session_file.exists():
-            try:
-                data = json.loads(session_file.read_text())
-                for msg in data[-2:]:
-                    last_messages.append(
-                        {
-                            "role": msg.get("role", ""),
-                            "content": msg.get("content", "")[:200],
-                            "timestamp": msg.get("timestamp", ""),
-                        }
-                    )
-            except (json.JSONDecodeError, OSError):
-                pass
-        sessions.append({"id": safe_key, **meta, "last_messages": last_messages})
-
-    return {"sessions": sessions}
 
 
 @app.get("/api/memory/session")

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from pocketclaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
+from pocketclaw.bus.format import convert_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +219,7 @@ class NeonizeAdapter(BaseChannelAdapter):
         """Send a text message via neonize."""
         if not self._client:
             return
+        text = convert_markdown(text, self.channel)
         try:
             # Look up the cached JID protobuf; fall back to building from string
             jid = self._jid_cache.get(to)

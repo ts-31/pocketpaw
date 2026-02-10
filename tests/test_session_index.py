@@ -350,12 +350,6 @@ class TestSessionsRESTEndpoints:
         data = resp.json()
         assert data["sessions"] == []
 
-    def test_recent_sessions(self, client):
-        resp = client.get("/api/sessions/recent?limit=5", headers=_auth_headers())
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "sessions" in data
-
 
 # =========================================================================
 # B1: WebSocket session switching

@@ -489,17 +489,14 @@ class Settings(BaseSettings):
             "max_concurrent_conversations": self.max_concurrent_conversations,
         }
 
-        # Separate secrets from non-secrets
+        # Save all fields to config.json (file is chmod 600)
+        # Additionally store secrets in the encrypted credential store
         store = get_credential_store()
-        config_data = {}
         for key, value in all_fields.items():
-            if key in SECRET_FIELDS:
-                if value:
-                    store.set(key, value)
-            else:
-                config_data[key] = value
+            if key in SECRET_FIELDS and value:
+                store.set(key, value)
 
-        config_path.write_text(json.dumps(config_data, indent=2))
+        config_path.write_text(json.dumps(all_fields, indent=2))
         _chmod_safe(config_path, 0o600)
 
     @classmethod
@@ -518,12 +515,13 @@ class Settings(BaseSettings):
             except (json.JSONDecodeError, Exception):
                 pass
 
-        # Overlay secrets from encrypted store
+        # Overlay secrets from encrypted store (falls back to config.json values)
         store = get_credential_store()
         secrets = store.get_all()
         for field in SECRET_FIELDS:
             if field in secrets and secrets[field]:
                 data[field] = secrets[field]
+            # data[field] may already be set from config.json — keep it as fallback
 
         if data:
             try:
@@ -602,14 +600,11 @@ def _migrate_plaintext_keys() -> None:
         value = data.get(field)
         if value and isinstance(value, str):
             store.set(field, value)
-            data[field] = None  # Remove plaintext secret
             migrated_count += 1
 
     if migrated_count:
-        config_path.write_text(json.dumps(data, indent=2))
-        _chmod_safe(config_path, 0o600)
         logger.info(
-            "Migrated %d secret(s) from plaintext config to encrypted store.", migrated_count
+            "Copied %d secret(s) from config to encrypted store.", migrated_count
         )
 
     _MIGRATION_DONE_PATH.write_text("1")

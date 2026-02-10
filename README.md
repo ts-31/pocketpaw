@@ -138,7 +138,6 @@ The browser-based dashboard is the default mode — just run `pocketpaw` and it 
 - **Channel management** — configure, start, and stop adapters from the sidebar
 - **MCP server management** — add, configure, and monitor MCP servers
 - Plan Mode approval modal for reviewing tool calls before execution
-- Cross-channel inbox for unified message view
 
 ### Channel Management
 

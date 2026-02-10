@@ -226,8 +226,8 @@ class TestConfigSecretSeparation:
 
         cfg.get_config_dir = original_fn
 
-    def test_secrets_not_in_config_json(self, env):
-        """API keys must NOT appear in config.json after save()."""
+    def test_secrets_in_config_json_as_fallback(self, env):
+        """Secrets are kept in config.json (chmod 600) as fallback for encrypted store failures."""
         from pocketclaw.config import Settings
 
         settings = Settings(
@@ -238,8 +238,9 @@ class TestConfigSecretSeparation:
         settings.save()
 
         config_data = json.loads((env["tmp_path"] / "config.json").read_text())
-        for field in SECRET_FIELDS:
-            assert field not in config_data, f"Secret '{field}' leaked to config.json!"
+        assert config_data["anthropic_api_key"] == "sk-ant-secret"
+        assert config_data["openai_api_key"] == "sk-openai-secret"
+        assert config_data["telegram_bot_token"] == "123:AAFake"
 
     def test_non_secrets_in_config_json(self, env):
         """Non-secret fields should still be in config.json."""
@@ -356,8 +357,8 @@ class TestPlaintextMigration:
         assert store.get("anthropic_api_key") == "sk-ant-old"
         assert store.get("openai_api_key") == "sk-old-openai"
 
-    def test_plaintext_keys_removed_from_config_json(self, env):
-        """After migration, config.json must not contain the secret fields."""
+    def test_plaintext_keys_preserved_in_config_json(self, env):
+        """After migration, config.json still has the keys (as fallback)."""
         from pocketclaw.config import Settings
 
         old_config = {
@@ -370,9 +371,9 @@ class TestPlaintextMigration:
         Settings.load()
 
         updated = json.loads((env["tmp_path"] / "config.json").read_text())
-        assert updated.get("telegram_bot_token") is None
-        assert updated.get("anthropic_api_key") is None
-        # Non-secret should remain
+        # Keys remain in config.json as fallback (file is chmod 600)
+        assert updated.get("telegram_bot_token") == "123:AAOldToken"
+        assert updated.get("anthropic_api_key") == "sk-ant-old"
         assert updated.get("agent_backend") == "claude_agent_sdk"
 
     def test_migration_flag_created(self, env):
@@ -436,7 +437,7 @@ class TestSecretFieldsList:
     """Verify the SECRET_FIELDS set is correct and complete."""
 
     def test_expected_fields_present(self):
-        """All 8 secret fields must be in SECRET_FIELDS."""
+        """All secret fields must be in SECRET_FIELDS."""
         expected = {
             "telegram_bot_token",
             "openai_api_key",
@@ -446,6 +447,20 @@ class TestSecretFieldsList:
             "slack_app_token",
             "whatsapp_access_token",
             "whatsapp_verify_token",
+            "tavily_api_key",
+            "brave_search_api_key",
+            "parallel_api_key",
+            "elevenlabs_api_key",
+            "google_api_key",
+            "google_oauth_client_id",
+            "google_oauth_client_secret",
+            "spotify_client_id",
+            "spotify_client_secret",
+            "matrix_access_token",
+            "matrix_password",
+            "teams_app_id",
+            "teams_app_password",
+            "gchat_service_account_key",
         }
         assert SECRET_FIELDS == expected
 

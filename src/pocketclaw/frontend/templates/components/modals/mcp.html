@@ -11,7 +11,7 @@
   x-transition.opacity
   @click.self="showMCP = false"
 >
-<div class="w-full max-w-[620px] flex flex-col bg-[#1c1c1e]/95 backdrop-blur-xl border border-[var(--glass-border)] rounded-[20px] shadow-2xl animate-[modalPop_0.25s_ease-out] overflow-hidden max-h-[90vh]" @click.stop>
+<div class="w-full max-w-[720px] flex flex-col bg-[#1c1c1e]/95 backdrop-blur-xl border border-[var(--glass-border)] rounded-[20px] shadow-2xl animate-[modalPop_0.25s_ease-out] overflow-hidden max-h-[90vh]" @click.stop>
     <!-- Header -->
     <div class="flex items-center justify-between px-6 py-5 border-b border-[var(--glass-border)] shrink-0">
         <div class="flex items-center gap-3">
@@ -27,12 +27,12 @@
     <div class="flex items-center gap-1 px-6 pt-4 pb-2 shrink-0">
         <button
             class="px-3 py-1.5 text-[12px] font-medium rounded-lg transition-colors"
-            :class="mcpView === 'servers' ? 'bg-accent/20 text-accent' : 'text-white/50 hover:text-white/80 hover:bg-white/5'"
+            :class="mcpView === 'servers' ? 'bg-[var(--accent-color)] text-white' : 'text-white/50 hover:text-white/80 hover:bg-white/5'"
             @click="mcpView = 'servers'"
         >My Servers</button>
         <button
             class="px-3 py-1.5 text-[12px] font-medium rounded-lg transition-colors"
-            :class="mcpView === 'catalog' ? 'bg-accent/20 text-accent' : 'text-white/50 hover:text-white/80 hover:bg-white/5'"
+            :class="mcpView === 'catalog' ? 'bg-[var(--accent-color)] text-white' : 'text-white/50 hover:text-white/80 hover:bg-white/5'"
             @click="mcpView = 'catalog'"
         >Catalog</button>
     </div>
@@ -52,7 +52,7 @@
                             ></span>
                             <div class="flex-1 min-w-0">
                                 <div class="font-medium text-[13px] truncate" x-text="name"></div>
-                                <div class="text-[11px] text-white/40" x-text="info.connected ? info.tool_count + ' tools' : (info.error || 'disconnected')"></div>
+                                <div class="text-[11px] text-white/50" x-text="info.connected ? info.tool_count + ' tools' : (info.error || 'disconnected')"></div>
                             </div>
                             <div class="flex items-center gap-1.5">
                                 <button
@@ -76,25 +76,41 @@
             </template>
 
             <template x-if="Object.keys(mcpServers).length === 0">
-                <div class="text-center py-8 text-white/40 text-[13px]">
-                    No MCP servers configured. Add one below or browse the <button class="text-accent underline" @click="mcpView = 'catalog'">Catalog</button>.
+                <div class="text-center py-8">
+                    <div class="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+                        <i data-lucide="puzzle" class="w-6 h-6 text-white/50"></i>
+                    </div>
+                    <h3 class="text-[14px] font-semibold text-white/70 mb-2">What is MCP?</h3>
+                    <p class="text-[12px] text-white/50 max-w-[360px] mx-auto leading-relaxed mb-4">
+                        Model Context Protocol lets your agent connect to external tools and data sources — databases, file systems, APIs, and more — through a standard interface.
+                    </p>
+                    <div class="flex items-center justify-center gap-3">
+                        <button class="px-3 py-1.5 text-[12px] font-medium bg-[var(--accent-color)] text-white rounded-lg hover:bg-[var(--accent-hover)] transition-colors" @click="mcpShowAddForm = true">Add Server</button>
+                        <button class="px-3 py-1.5 text-[12px] font-medium bg-white/5 text-white/60 rounded-lg hover:bg-white/10 transition-colors" @click="mcpView = 'catalog'">Browse Catalog</button>
+                    </div>
                 </div>
             </template>
 
             <!-- Add Server Form -->
             <div class="border-t border-[var(--glass-border)] pt-5 mt-5">
-                <h3 class="text-[13px] font-semibold text-white/70 mb-3">Add Server</h3>
-                <div class="flex flex-col gap-3">
+                <button
+                    class="flex items-center gap-2 text-[13px] font-semibold text-white/70 hover:text-white transition-colors w-full"
+                    @click="mcpShowAddForm = !mcpShowAddForm"
+                >
+                    <i :data-lucide="mcpShowAddForm ? 'chevron-down' : 'chevron-right'" class="w-3.5 h-3.5"></i>
+                    Add Server
+                </button>
+                <div x-show="mcpShowAddForm" x-transition class="flex flex-col gap-3 mt-3">
                     <div class="flex gap-3">
                         <input
                             type="text"
                             x-model="mcpForm.name"
                             placeholder="Server name (e.g. filesystem)"
-                            class="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-[13px] focus:border-accent focus:outline-none"
+                            class="flex-1 px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-[13px] text-white placeholder-white/40 focus:border-accent focus:outline-none"
                         />
                         <select
                             x-model="mcpForm.transport"
-                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-[13px] focus:border-accent focus:outline-none"
+                            class="px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-[13px] text-white placeholder-white/40 focus:border-accent focus:outline-none"
                         >
                             <option value="stdio">stdio</option>
                             <option value="http">http</option>
@@ -106,13 +122,13 @@
                                 type="text"
                                 x-model="mcpForm.command"
                                 placeholder="Command (e.g. npx)"
-                                class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-[13px] focus:border-accent focus:outline-none"
+                                class="px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-[13px] text-white placeholder-white/40 focus:border-accent focus:outline-none"
                             />
                             <input
                                 type="text"
                                 x-model="mcpForm.args"
                                 placeholder="Args (comma-separated, e.g. -y,@mcp/server-fs,/home)"
-                                class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-[13px] focus:border-accent focus:outline-none"
+                                class="px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-[13px] text-white placeholder-white/40 focus:border-accent focus:outline-none"
                             />
                         </div>
                     </template>
@@ -121,13 +137,13 @@
                             type="text"
                             x-model="mcpForm.url"
                             placeholder="Server URL (e.g. http://localhost:9000)"
-                            class="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-[13px] focus:border-accent focus:outline-none"
+                            class="px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-[13px] text-white placeholder-white/40 focus:border-accent focus:outline-none"
                         />
                     </template>
                     <button
                         @click="addMCPServer()"
                         :disabled="mcpLoading || !mcpForm.name"
-                        class="px-4 py-2.5 bg-accent/20 text-accent font-medium rounded-xl hover:bg-accent/30 transition-colors disabled:opacity-50 text-[13px]"
+                        class="px-4 py-2.5 bg-[var(--accent-color)] text-white font-medium rounded-xl hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50 text-[13px]"
                     >
                         <span x-show="!mcpLoading">Add Server</span>
                         <span x-show="mcpLoading">Adding...</span>
@@ -143,7 +159,7 @@
                 <template x-for="cat in ['all', 'dev', 'productivity', 'data', 'search', 'devops']" :key="cat">
                     <button
                         class="px-2.5 py-1 text-[11px] font-medium rounded-full transition-colors capitalize"
-                        :class="mcpCategoryFilter === cat ? 'bg-accent/20 text-accent' : 'bg-white/5 text-white/50 hover:text-white/80 hover:bg-white/10'"
+                        :class="mcpCategoryFilter === cat ? 'bg-[var(--accent-color)] text-white' : 'bg-white/5 text-white/50 hover:text-white/80 hover:bg-white/10'"
                         @click="mcpCategoryFilter = cat"
                         x-text="cat"
                     ></button>
@@ -161,14 +177,14 @@
                             </div>
                             <div class="flex-1 min-w-0">
                                 <div class="font-medium text-[13px] truncate" x-text="preset.name"></div>
-                                <div class="text-[11px] text-white/40 truncate" x-text="preset.description"></div>
+                                <div class="text-[11px] text-white/50 truncate" x-text="preset.description"></div>
                             </div>
                             <template x-if="preset.installed">
-                                <span class="px-2 py-0.5 text-[10px] font-medium bg-[var(--success-color)]/15 text-[var(--success-color)] rounded-full shrink-0">Installed</span>
+                                <span class="px-2 py-0.5 text-[10px] font-medium bg-[var(--success-color)]/20 text-white rounded-full shrink-0">Installed</span>
                             </template>
                             <template x-if="!preset.installed">
                                 <button
-                                    class="px-3 py-1.5 text-[12px] font-medium bg-accent/20 text-accent rounded-lg hover:bg-accent/30 transition-colors shrink-0"
+                                    class="px-3 py-1.5 text-[12px] font-medium bg-[var(--accent-color)] text-white rounded-lg hover:bg-[var(--accent-hover)] transition-colors shrink-0"
                                     @click="showInstallForm(preset.id)"
                                     x-text="mcpInstallId === preset.id ? 'Cancel' : 'Install'"
                                 ></button>
@@ -189,7 +205,7 @@
                                         :type="ek.secret ? 'password' : 'text'"
                                         :placeholder="ek.placeholder"
                                         x-model="mcpInstallEnv[ek.key]"
-                                        class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-[13px] focus:border-accent focus:outline-none font-mono"
+                                        class="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-[13px] text-white placeholder-white/40 focus:border-accent focus:outline-none font-mono"
                                     />
                                 </div>
                             </template>
@@ -202,7 +218,7 @@
                                         type="text"
                                         x-model="mcpInstallArgs"
                                         :placeholder="preset.id === 'filesystem' ? '/home/user/allowed-dir' : preset.id === 'postgres' ? 'postgresql://user:pass@localhost/db' : '/path/to/database.db'"
-                                        class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-[13px] focus:border-accent focus:outline-none font-mono"
+                                        class="w-full px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-[13px] text-white placeholder-white/40 focus:border-accent focus:outline-none font-mono"
                                     />
                                 </div>
                             </template>
@@ -211,7 +227,7 @@
                                 <button
                                     @click="installPreset()"
                                     :disabled="mcpInstalling"
-                                    class="px-4 py-2 text-[12px] font-medium bg-accent/20 text-accent rounded-lg hover:bg-accent/30 transition-colors disabled:opacity-50"
+                                    class="px-4 py-2 text-[12px] font-medium bg-[var(--accent-color)] text-white rounded-lg hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
                                 >
                                     <span x-show="!mcpInstalling">Install &amp; Connect</span>
                                     <span x-show="mcpInstalling">Installing...</span>
@@ -224,7 +240,7 @@
                                     <a
                                         :href="preset.docs_url"
                                         target="_blank"
-                                        class="text-[11px] text-white/30 hover:text-accent transition-colors ml-auto"
+                                        class="text-[11px] text-white/50 hover:text-accent transition-colors ml-auto"
                                     >Docs</a>
                                 </template>
                             </div>
@@ -233,7 +249,7 @@
                 </template>
 
                 <template x-if="filteredPresets().length === 0">
-                    <div class="text-center py-6 text-white/40 text-[13px]">
+                    <div class="text-center py-6 text-white/50 text-[13px]">
                         No presets in this category.
                     </div>
                 </template>

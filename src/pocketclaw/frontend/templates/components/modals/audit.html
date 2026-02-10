@@ -15,7 +15,7 @@
         <div class="p-6 overflow-y-auto">
             <div x-show="auditLoading" class="p-8 text-center"><i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto text-white/50"></i></div>
             <!-- Empty state -->
-            <div x-show="!auditLoading && auditLogs.length === 0" class="flex flex-col items-center justify-center py-12 text-white/30">
+            <div x-show="!auditLoading && auditLogs.length === 0" class="flex flex-col items-center justify-center py-12 text-white/50">
                 <i data-lucide="shield-check" class="w-12 h-12 mb-3 opacity-50"></i>
                 <p class="text-sm">No audit entries yet</p>
                 <p class="text-xs mt-1">Security events will be logged here during agent operation</p>

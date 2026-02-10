@@ -3,10 +3,11 @@
 
   Redesigned: 2026-02-10
   - Two-column layout: sidebar nav + content area
-  - 8 sections: General, Security, Behavior, Memory, API Keys, Search, Services, System
+  - 6 sections: General, API Keys, Behavior & Safety, Memory, Search & Services, System
   - Mobile: section list / content toggle with back arrow
   - Fixed height modal (600px / 85vh cap) — content scrolls, height stays stable
   - All existing form fields preserved with same x-model bindings
+  - API keys consolidated into single section with "Get Key" links
 -->
 <!-- Settings Modal -->
 <div
@@ -84,7 +85,7 @@ x-transition.opacity
                         <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
                     </div>
                     </div>
-                    <small class="text-white/35 text-[11px]" x-text="getBackendDescription(settings.agentBackend)"></small>
+                    <small class="text-white/50 text-[11px]" x-text="getBackendDescription(settings.agentBackend)"></small>
                 </div>
 
                 <!-- LLM Provider -->
@@ -144,36 +145,239 @@ x-transition.opacity
                 </div>
             </div>
 
-            <!-- ===================== Security ===================== -->
-            <div x-show="settingsSection === 'security'" class="space-y-4">
-                <h3 class="text-[14px] font-semibold text-white/80 mb-3">Security</h3>
+            <!-- ===================== API Keys (Consolidated) ===================== -->
+            <div x-show="settingsSection === 'apikeys'" class="space-y-4">
+                <h3 class="text-[14px] font-semibold text-white/80 mb-3">API Keys</h3>
+                <p class="text-[12px] text-white/50 -mt-1 mb-2">Manage all your API keys in one place. Keys are encrypted at rest.</p>
 
-                <!-- Injection Scanner -->
-                <div>
-                    <label class="flex items-start gap-2.5 cursor-pointer group">
-                    <input type="checkbox" x-model="settings.injectionScanEnabled" @change="saveSettings()" class="mt-0.5 accent-[var(--accent-color)] w-4 h-4">
-                    <div class="flex flex-col">
-                        <span class="text-[13px] font-medium group-hover:text-white transition-colors">Injection Scanner</span>
-                        <span class="text-[11px] text-white/40 mt-0.5">Scan inbound messages for prompt injection attacks</span>
+                <!-- Anthropic API Key -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)] uppercase tracking-wide">Anthropic API Key</label>
+                        <div class="flex items-center gap-2">
+                            <a href="https://console.anthropic.com/api-keys" target="_blank" rel="noopener" class="api-key-help">
+                                <i data-lucide="external-link" class="w-3 h-3"></i> Get Key
+                            </a>
+                            <span x-show="hasAnthropicKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                                <i data-lucide="check" class="w-3 h-3"></i> Saved
+                            </span>
+                        </div>
                     </div>
-                    </label>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.anthropic" :placeholder="hasAnthropicKey ? '••••••••••••••••' : 'sk-ant-...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('anthropic')">Save</button>
+                    </div>
                 </div>
 
-                <!-- LLM Deep Scan -->
-                <div class="pl-7" x-show="settings.injectionScanEnabled" x-transition>
-                    <label class="flex items-start gap-2.5 cursor-pointer group">
-                    <input type="checkbox" x-model="settings.injectionScanLlm" @change="saveSettings()" class="mt-0.5 accent-[var(--accent-color)] w-4 h-4">
-                    <div class="flex flex-col">
-                        <span class="text-[13px] font-medium group-hover:text-white transition-colors">LLM Deep Scan</span>
-                        <span class="text-[11px] text-white/40 mt-0.5">Use a secondary LLM to analyze suspicious content (requires API key)</span>
+                <!-- OpenAI API Key -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)] uppercase tracking-wide">OpenAI API Key</label>
+                        <div class="flex items-center gap-2">
+                            <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" class="api-key-help">
+                                <i data-lucide="external-link" class="w-3 h-3"></i> Get Key
+                            </a>
+                            <span x-show="hasOpenaiKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                                <i data-lucide="check" class="w-3 h-3"></i> Saved
+                            </span>
+                        </div>
                     </div>
-                    </label>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.openai" :placeholder="hasOpenaiKey ? '••••••••••••••••' : 'sk-...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('openai')">Save</button>
+                    </div>
+                </div>
+
+                <hr class="border-t border-[var(--glass-border)] opacity-30 my-1" />
+                <h4 class="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide">Search Providers</h4>
+
+                <!-- Tavily API Key -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Tavily API Key</label>
+                        <div class="flex items-center gap-2">
+                            <a href="https://app.tavily.com/home" target="_blank" rel="noopener" class="api-key-help">
+                                <i data-lucide="external-link" class="w-3 h-3"></i> Get Key
+                            </a>
+                            <span x-show="hasTavilyKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                                <i data-lucide="check" class="w-3 h-3"></i> Saved
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.tavily" :placeholder="hasTavilyKey ? '••••••••••••••••' : 'tvly-...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('tavily')">Save</button>
+                    </div>
+                </div>
+
+                <!-- Brave Search API Key -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Brave Search API Key</label>
+                        <div class="flex items-center gap-2">
+                            <a href="https://api.search.brave.com/app/dashboard" target="_blank" rel="noopener" class="api-key-help">
+                                <i data-lucide="external-link" class="w-3 h-3"></i> Get Key
+                            </a>
+                            <span x-show="hasBraveKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                                <i data-lucide="check" class="w-3 h-3"></i> Saved
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.brave" :placeholder="hasBraveKey ? '••••••••••••••••' : 'BSA...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('brave')">Save</button>
+                    </div>
+                </div>
+
+                <!-- Parallel AI API Key -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Parallel AI API Key</label>
+                        <span x-show="hasParallelKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                            <i data-lucide="check" class="w-3 h-3"></i> Saved
+                        </span>
+                    </div>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.parallel" :placeholder="hasParallelKey ? '••••••••••••••••' : 'par-...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('parallel')">Save</button>
+                    </div>
+                    <small class="text-white/50 text-[11px]">Used by both web search (parallel provider) and URL extract</small>
+                </div>
+
+                <hr class="border-t border-[var(--glass-border)] opacity-30 my-1" />
+                <h4 class="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide">Voice & Media</h4>
+
+                <!-- ElevenLabs API Key -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">ElevenLabs API Key</label>
+                        <div class="flex items-center gap-2">
+                            <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener" class="api-key-help">
+                                <i data-lucide="external-link" class="w-3 h-3"></i> Get Key
+                            </a>
+                            <span x-show="hasElevenlabsKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                                <i data-lucide="check" class="w-3 h-3"></i> Saved
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.elevenlabs" :placeholder="hasElevenlabsKey ? '••••••••••••••••' : 'xi-...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('elevenlabs')">Save</button>
+                    </div>
+                </div>
+
+                <hr class="border-t border-[var(--glass-border)] opacity-30 my-1" />
+                <h4 class="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide">Google OAuth</h4>
+
+                <!-- Google OAuth Client ID -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Client ID</label>
+                        <div class="flex items-center gap-2">
+                            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" class="api-key-help">
+                                <i data-lucide="external-link" class="w-3 h-3"></i> Get Key
+                            </a>
+                            <span x-show="hasGoogleOAuthId" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                                <i data-lucide="check" class="w-3 h-3"></i> Saved
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.google_oauth_id" :placeholder="hasGoogleOAuthId ? '••••••••••••••••' : 'client-id...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('google_oauth_id')">Save</button>
+                    </div>
+                </div>
+
+                <!-- Google OAuth Client Secret -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Client Secret</label>
+                        <span x-show="hasGoogleOAuthSecret" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                            <i data-lucide="check" class="w-3 h-3"></i> Saved
+                        </span>
+                    </div>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.google_oauth_secret" :placeholder="hasGoogleOAuthSecret ? '••••••••••••••••' : 'client-secret...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('google_oauth_secret')">Save</button>
+                    </div>
+                </div>
+
+                <!-- Google OAuth Authorize Buttons -->
+                <div class="flex flex-col gap-1.5" x-show="hasGoogleOAuthId && hasGoogleOAuthSecret">
+                    <label class="text-[12px] font-medium text-[var(--text-secondary)]">Authorize Services</label>
+                    <div class="flex flex-wrap gap-1.5">
+                        <a href="/oauth/authorize/gmail" target="_blank" class="inline-flex items-center gap-1.5 bg-black/30 border border-[var(--glass-border)] hover:border-[var(--accent-color)] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
+                            <i data-lucide="mail" class="w-3 h-3"></i> Gmail
+                        </a>
+                        <a href="/oauth/authorize/google_calendar" target="_blank" class="inline-flex items-center gap-1.5 bg-black/30 border border-[var(--glass-border)] hover:border-[var(--accent-color)] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
+                            <i data-lucide="calendar" class="w-3 h-3"></i> Calendar
+                        </a>
+                        <a href="/oauth/authorize/google_drive" target="_blank" class="inline-flex items-center gap-1.5 bg-black/30 border border-[var(--glass-border)] hover:border-[var(--accent-color)] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
+                            <i data-lucide="hard-drive" class="w-3 h-3"></i> Drive
+                        </a>
+                        <a href="/oauth/authorize/google_docs" target="_blank" class="inline-flex items-center gap-1.5 bg-black/30 border border-[var(--glass-border)] hover:border-[var(--accent-color)] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
+                            <i data-lucide="file-text" class="w-3 h-3"></i> Docs
+                        </a>
+                    </div>
+                </div>
+
+                <hr class="border-t border-[var(--glass-border)] opacity-30 my-1" />
+                <h4 class="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide">Spotify</h4>
+
+                <!-- Spotify Client ID -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Client ID</label>
+                        <div class="flex items-center gap-2">
+                            <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener" class="api-key-help">
+                                <i data-lucide="external-link" class="w-3 h-3"></i> Get Key
+                            </a>
+                            <span x-show="hasSpotifyClientId" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                                <i data-lucide="check" class="w-3 h-3"></i> Saved
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.spotify_client_id" :placeholder="hasSpotifyClientId ? '••••••••••••••••' : 'spotify-client-id...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('spotify_client_id')">Save</button>
+                    </div>
+                </div>
+
+                <!-- Spotify Client Secret -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Client Secret</label>
+                        <span x-show="hasSpotifyClientSecret" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
+                            <i data-lucide="check" class="w-3 h-3"></i> Saved
+                        </span>
+                    </div>
+                    <div class="flex gap-2">
+                    <input type="password" x-model="apiKeys.spotify_client_secret" :placeholder="hasSpotifyClientSecret ? '••••••••••••••••' : 'spotify-client-secret...'"
+                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('spotify_client_secret')">Save</button>
+                    </div>
+                </div>
+
+                <!-- Spotify OAuth Authorize Button -->
+                <div x-show="hasSpotifyClientId && hasSpotifyClientSecret">
+                    <a href="/oauth/authorize/spotify" target="_blank" class="inline-flex items-center gap-1.5 bg-[#1DB954]/20 border border-[#1DB954]/40 hover:border-[#1DB954] text-[#1DB954] hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
+                        <i data-lucide="music" class="w-3 h-3"></i> Authorize Spotify
+                    </a>
                 </div>
             </div>
 
-            <!-- ===================== Behavior ===================== -->
+            <!-- ===================== Behavior & Safety ===================== -->
             <div x-show="settingsSection === 'behavior'" class="space-y-4">
-                <h3 class="text-[14px] font-semibold text-white/80 mb-3">Behavior</h3>
+                <h3 class="text-[14px] font-semibold text-white/80 mb-3">Behavior & Safety</h3>
 
                 <!-- Tool Profile -->
                 <div class="flex flex-col gap-1.5">
@@ -200,7 +404,7 @@ x-transition.opacity
                     <input type="checkbox" x-model="settings.planMode" @change="saveSettings()" class="mt-0.5 accent-[var(--accent-color)] w-4 h-4">
                     <div class="flex flex-col">
                         <span class="text-[13px] font-medium group-hover:text-white transition-colors">Plan Mode</span>
-                        <span class="text-[11px] text-white/40 mt-0.5">Require approval before executing tools</span>
+                        <span class="text-[11px] text-white/50 mt-0.5">Require approval before executing tools</span>
                     </div>
                     </label>
                 </div>
@@ -213,9 +417,9 @@ x-transition.opacity
                         x-model="settings.planModeTools"
                         @change="saveSettings()"
                         placeholder="shell,write_file,edit_file"
-                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20"
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40"
                     />
-                    <small class="text-white/35 text-[11px]">Comma-separated list of tools that require approval</small>
+                    <small class="text-white/50 text-[11px]">Comma-separated list of tools that require approval</small>
                 </div>
 
                 <!-- Smart Model Routing -->
@@ -224,7 +428,7 @@ x-transition.opacity
                     <input type="checkbox" x-model="settings.smartRoutingEnabled" @change="saveSettings()" class="mt-0.5 accent-[var(--accent-color)] w-4 h-4">
                     <div class="flex flex-col">
                         <span class="text-[13px] font-medium group-hover:text-white transition-colors">Smart Model Routing</span>
-                        <span class="text-[11px] text-white/40 mt-0.5">Automatically select model based on task complexity</span>
+                        <span class="text-[11px] text-white/50 mt-0.5">Automatically select model based on task complexity</span>
                     </div>
                     </label>
                 </div>
@@ -234,18 +438,43 @@ x-transition.opacity
                     <div class="flex flex-col gap-1">
                         <label class="text-[12px] font-medium text-[var(--text-secondary)]">Simple Tier</label>
                         <input type="text" x-model="settings.modelTierSimple" @change="saveSettings()"
-                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
                     </div>
                     <div class="flex flex-col gap-1">
                         <label class="text-[12px] font-medium text-[var(--text-secondary)]">Moderate Tier</label>
                         <input type="text" x-model="settings.modelTierModerate" @change="saveSettings()"
-                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
                     </div>
                     <div class="flex flex-col gap-1">
                         <label class="text-[12px] font-medium text-[var(--text-secondary)]">Complex Tier</label>
                         <input type="text" x-model="settings.modelTierComplex" @change="saveSettings()"
-                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
                     </div>
+                </div>
+
+                <hr class="border-t border-[var(--glass-border)] opacity-30 my-1" />
+                <h4 class="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide">Safety</h4>
+
+                <!-- Injection Scanner -->
+                <div>
+                    <label class="flex items-start gap-2.5 cursor-pointer group">
+                    <input type="checkbox" x-model="settings.injectionScanEnabled" @change="saveSettings()" class="mt-0.5 accent-[var(--accent-color)] w-4 h-4">
+                    <div class="flex flex-col">
+                        <span class="text-[13px] font-medium group-hover:text-white transition-colors">Injection Scanner</span>
+                        <span class="text-[11px] text-white/50 mt-0.5">Scan inbound messages for prompt injection attacks</span>
+                    </div>
+                    </label>
+                </div>
+
+                <!-- LLM Deep Scan -->
+                <div class="pl-7" x-show="settings.injectionScanEnabled" x-transition>
+                    <label class="flex items-start gap-2.5 cursor-pointer group">
+                    <input type="checkbox" x-model="settings.injectionScanLlm" @change="saveSettings()" class="mt-0.5 accent-[var(--accent-color)] w-4 h-4">
+                    <div class="flex flex-col">
+                        <span class="text-[13px] font-medium group-hover:text-white transition-colors">LLM Deep Scan</span>
+                        <span class="text-[11px] text-white/50 mt-0.5">Use a secondary LLM to analyze suspicious content (requires API key)</span>
+                    </div>
+                    </label>
                 </div>
             </div>
 
@@ -269,7 +498,7 @@ x-transition.opacity
                         <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
                     </div>
                     </div>
-                    <small class="text-white/35 text-[11px]" x-text="settings.memoryBackend === 'mem0' ? 'Uses LLM to extract and evolve facts. Requires mem0ai package.' : 'Simple append-only markdown files. No dependencies needed.'"></small>
+                    <small class="text-white/50 text-[11px]" x-text="settings.memoryBackend === 'mem0' ? 'Uses LLM to extract and evolve facts. Requires mem0ai package.' : 'Simple append-only markdown files. No dependencies needed.'"></small>
                 </div>
 
                 <!-- Mem0 Options -->
@@ -281,7 +510,7 @@ x-transition.opacity
                         <input type="checkbox" x-model="settings.mem0AutoLearn" @change="saveSettings()" class="mt-0.5 accent-[var(--accent-color)] w-4 h-4">
                         <div class="flex flex-col">
                             <span class="text-[13px] font-medium group-hover:text-white transition-colors">Auto-Learn</span>
-                            <span class="text-[11px] text-white/40 mt-0.5">Automatically extract facts from every conversation</span>
+                            <span class="text-[11px] text-white/50 mt-0.5">Automatically extract facts from every conversation</span>
                         </div>
                         </label>
                     </div>
@@ -303,14 +532,14 @@ x-transition.opacity
                             <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
                         </div>
                         </div>
-                        <small class="text-white/35 text-[11px]">LLM used for fact extraction and memory consolidation</small>
+                        <small class="text-white/50 text-[11px]">LLM used for fact extraction and memory consolidation</small>
                     </div>
 
                     <!-- LLM Model -->
                     <div class="flex flex-col gap-1.5">
                         <label class="text-[12px] font-medium text-[var(--text-secondary)]">Mem0 LLM Model</label>
                         <input type="text" x-model="settings.mem0LlmModel" @change="saveSettings()" placeholder="claude-haiku-4-5-20251001"
-                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
                     </div>
 
                     <!-- Embedder Provider -->
@@ -336,7 +565,7 @@ x-transition.opacity
                     <div class="flex flex-col gap-1.5">
                         <label class="text-[12px] font-medium text-[var(--text-secondary)]">Embedder Model</label>
                         <input type="text" x-model="settings.mem0EmbedderModel" @change="saveSettings()" placeholder="text-embedding-3-small"
-                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
                     </div>
 
                     <!-- Vector Store -->
@@ -361,49 +590,14 @@ x-transition.opacity
                     <div class="flex flex-col gap-1.5" x-show="settings.mem0LlmProvider === 'ollama' || settings.mem0EmbedderProvider === 'ollama'" x-transition>
                         <label class="text-[12px] font-medium text-[var(--text-secondary)]">Ollama Base URL</label>
                         <input type="text" x-model="settings.mem0OllamaBaseUrl" @change="saveSettings()" placeholder="http://localhost:11434"
-                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
+                            class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
                     </div>
                 </div>
             </div>
 
-            <!-- ===================== API Keys ===================== -->
-            <div x-show="settingsSection === 'apikeys'" class="space-y-4">
-                <h3 class="text-[14px] font-semibold text-white/80 mb-3">API Keys</h3>
-
-                <!-- Anthropic API Key -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)] uppercase tracking-wide">Anthropic API Key</label>
-                        <span x-show="hasAnthropicKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.anthropic" :placeholder="hasAnthropicKey ? '••••••••••••••••' : 'sk-ant-...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('anthropic')">Save</button>
-                    </div>
-                </div>
-
-                <!-- OpenAI API Key -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)] uppercase tracking-wide">OpenAI API Key</label>
-                        <span x-show="hasOpenaiKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.openai" :placeholder="hasOpenaiKey ? '••••••••••••••••' : 'sk-...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('openai')">Save</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ===================== Search ===================== -->
-            <div x-show="settingsSection === 'search'" class="space-y-4">
-                <h3 class="text-[14px] font-semibold text-white/80 mb-3">Search & Extract</h3>
+            <!-- ===================== Search & Services ===================== -->
+            <div x-show="settingsSection === 'services'" class="space-y-4">
+                <h3 class="text-[14px] font-semibold text-white/80 mb-3">Search & Services</h3>
 
                 <!-- Web Search Provider -->
                 <div class="flex flex-col gap-1.5">
@@ -438,57 +632,7 @@ x-transition.opacity
                 </div>
 
                 <hr class="border-t border-[var(--glass-border)] opacity-30 my-1" />
-
-                <!-- Tavily API Key -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Tavily API Key</label>
-                        <span x-show="hasTavilyKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.tavily" :placeholder="hasTavilyKey ? '••••••••••••••••' : 'tvly-...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('tavily')">Save</button>
-                    </div>
-                </div>
-
-                <!-- Brave Search API Key -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Brave Search API Key</label>
-                        <span x-show="hasBraveKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.brave" :placeholder="hasBraveKey ? '••••••••••••••••' : 'BSA...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('brave')">Save</button>
-                    </div>
-                </div>
-
-                <!-- Parallel AI API Key -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Parallel AI API Key</label>
-                        <span x-show="hasParallelKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.parallel" :placeholder="hasParallelKey ? '••••••••••••••••' : 'par-...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('parallel')">Save</button>
-                    </div>
-                    <small class="text-white/35 text-[11px]">Used by both web search (parallel provider) and URL extract</small>
-                </div>
-            </div>
-
-            <!-- ===================== Services ===================== -->
-            <div x-show="settingsSection === 'services'" class="space-y-4">
-                <h3 class="text-[14px] font-semibold text-white/80 mb-3">Services</h3>
+                <h4 class="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide">Voice</h4>
 
                 <!-- TTS Provider -->
                 <div class="flex flex-col gap-1.5">
@@ -509,125 +653,16 @@ x-transition.opacity
                 <div class="flex flex-col gap-1.5">
                     <label class="text-[12px] font-medium text-[var(--text-secondary)] uppercase tracking-wide">TTS Voice</label>
                     <input type="text" x-model="settings.ttsVoice" @change="saveSettings()" placeholder="alloy"
-                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <small class="text-white/35 text-[11px]">OpenAI: alloy/echo/fable/onyx/nova/shimmer</small>
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <small class="text-white/50 text-[11px]">OpenAI: alloy/echo/fable/onyx/nova/shimmer</small>
                 </div>
 
                 <!-- STT Model -->
                 <div class="flex flex-col gap-1.5">
                     <label class="text-[12px] font-medium text-[var(--text-secondary)] uppercase tracking-wide">STT Model</label>
                     <input type="text" x-model="settings.sttModel" @change="saveSettings()" placeholder="whisper-1"
-                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <small class="text-white/35 text-[11px]">OpenAI Whisper model for speech-to-text transcription</small>
-                </div>
-
-                <!-- ElevenLabs API Key -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">ElevenLabs API Key</label>
-                        <span x-show="hasElevenlabsKey" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.elevenlabs" :placeholder="hasElevenlabsKey ? '••••••••••••••••' : 'xi-...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('elevenlabs')">Save</button>
-                    </div>
-                </div>
-
-                <hr class="border-t border-[var(--glass-border)] opacity-30 my-1" />
-
-                <h4 class="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide">Google OAuth</h4>
-
-                <!-- Google OAuth Client ID -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Client ID</label>
-                        <span x-show="hasGoogleOAuthId" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.google_oauth_id" :placeholder="hasGoogleOAuthId ? '••••••••••••••••' : 'client-id...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('google_oauth_id')">Save</button>
-                    </div>
-                </div>
-
-                <!-- Google OAuth Client Secret -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Client Secret</label>
-                        <span x-show="hasGoogleOAuthSecret" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.google_oauth_secret" :placeholder="hasGoogleOAuthSecret ? '••••••••••••••••' : 'client-secret...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('google_oauth_secret')">Save</button>
-                    </div>
-                </div>
-
-                <!-- Google OAuth Authorize Buttons -->
-                <div class="flex flex-col gap-1.5" x-show="hasGoogleOAuthId && hasGoogleOAuthSecret">
-                    <label class="text-[12px] font-medium text-[var(--text-secondary)]">Authorize Services</label>
-                    <div class="flex flex-wrap gap-1.5">
-                        <a href="/oauth/authorize/gmail" target="_blank" class="inline-flex items-center gap-1.5 bg-black/30 border border-[var(--glass-border)] hover:border-[var(--accent-color)] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
-                            <i data-lucide="mail" class="w-3 h-3"></i> Gmail
-                        </a>
-                        <a href="/oauth/authorize/google_calendar" target="_blank" class="inline-flex items-center gap-1.5 bg-black/30 border border-[var(--glass-border)] hover:border-[var(--accent-color)] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
-                            <i data-lucide="calendar" class="w-3 h-3"></i> Calendar
-                        </a>
-                        <a href="/oauth/authorize/google_drive" target="_blank" class="inline-flex items-center gap-1.5 bg-black/30 border border-[var(--glass-border)] hover:border-[var(--accent-color)] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
-                            <i data-lucide="hard-drive" class="w-3 h-3"></i> Drive
-                        </a>
-                        <a href="/oauth/authorize/google_docs" target="_blank" class="inline-flex items-center gap-1.5 bg-black/30 border border-[var(--glass-border)] hover:border-[var(--accent-color)] text-white/80 hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
-                            <i data-lucide="file-text" class="w-3 h-3"></i> Docs
-                        </a>
-                    </div>
-                </div>
-
-                <hr class="border-t border-[var(--glass-border)] opacity-30 my-1" />
-
-                <h4 class="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide">Spotify</h4>
-
-                <!-- Spotify Client ID -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Client ID</label>
-                        <span x-show="hasSpotifyClientId" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.spotify_client_id" :placeholder="hasSpotifyClientId ? '••••••••••••••••' : 'spotify-client-id...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('spotify_client_id')">Save</button>
-                    </div>
-                </div>
-
-                <!-- Spotify Client Secret -->
-                <div class="flex flex-col gap-1.5">
-                    <div class="flex justify-between items-center">
-                        <label class="text-[12px] font-medium text-[var(--text-secondary)]">Client Secret</label>
-                        <span x-show="hasSpotifyClientSecret" class="text-[11px] font-medium text-[var(--success-color)] flex items-center gap-1">
-                            <i data-lucide="check" class="w-3 h-3"></i> Saved
-                        </span>
-                    </div>
-                    <div class="flex gap-2">
-                    <input type="password" x-model="apiKeys.spotify_client_secret" :placeholder="hasSpotifyClientSecret ? '••••••••••••••••' : 'spotify-client-secret...'"
-                        class="flex-1 bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <button class="bg-[var(--accent-color)] hover:bg-[var(--accent-hover)] text-white px-3.5 py-2 rounded-[8px] text-[12px] font-semibold transition-all active:scale-95" @click="saveApiKey('spotify_client_secret')">Save</button>
-                    </div>
-                </div>
-
-                <!-- Spotify OAuth Authorize Button -->
-                <div x-show="hasSpotifyClientId && hasSpotifyClientSecret">
-                    <a href="/oauth/authorize/spotify" target="_blank" class="inline-flex items-center gap-1.5 bg-[#1DB954]/20 border border-[#1DB954]/40 hover:border-[#1DB954] text-[#1DB954] hover:text-white px-2.5 py-1.5 rounded-[8px] text-[12px] transition-all">
-                        <i data-lucide="music" class="w-3 h-3"></i> Authorize Spotify
-                    </a>
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <small class="text-white/50 text-[11px]">OpenAI Whisper model for speech-to-text transcription</small>
                 </div>
             </div>
 
@@ -641,7 +676,7 @@ x-transition.opacity
                     <input type="checkbox" x-model="settings.selfAuditEnabled" @change="saveSettings()" class="mt-0.5 accent-[var(--accent-color)] w-4 h-4">
                     <div class="flex flex-col">
                         <span class="text-[13px] font-medium group-hover:text-white transition-colors">Self-Audit Daemon</span>
-                        <span class="text-[11px] text-white/40 mt-0.5">Run automated security and health checks on a schedule</span>
+                        <span class="text-[11px] text-white/50 mt-0.5">Run automated security and health checks on a schedule</span>
                     </div>
                     </label>
                 </div>
@@ -650,8 +685,8 @@ x-transition.opacity
                 <div class="flex flex-col gap-1.5 pl-7" x-show="settings.selfAuditEnabled" x-transition>
                     <label class="text-[12px] font-medium text-[var(--text-secondary)]">Schedule (cron)</label>
                     <input type="text" x-model="settings.selfAuditSchedule" @change="saveSettings()" placeholder="0 3 * * *"
-                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/20" />
-                    <small class="text-white/35 text-[11px]">Cron expression (default: 3 AM daily)</small>
+                        class="w-full bg-black/30 border border-[var(--glass-border)] rounded-[10px] py-2 px-3 text-[13px] text-white focus:outline-none focus:border-[var(--accent-color)] focus:bg-black/40 transition-all placeholder-white/40" />
+                    <small class="text-white/50 text-[11px]">Cron expression (default: 3 AM daily)</small>
                 </div>
 
                 <!-- Divider -->
@@ -662,10 +697,10 @@ x-transition.opacity
                     <div class="flex items-center justify-between">
                         <div>
                             <span class="text-[13px] font-medium">Security Audit</span>
-                            <p class="text-[11px] text-white/40 mt-0.5">Run 7 security checks on your configuration</p>
+                            <p class="text-[11px] text-white/50 mt-0.5">Run 7 security checks on your configuration</p>
                         </div>
                         <button @click="runSecurityAudit()" :disabled="securityAuditLoading"
-                            class="px-3 py-1.5 text-[12px] font-medium bg-[var(--accent-color)]/20 text-[var(--accent-color)] rounded-lg hover:bg-[var(--accent-color)]/30 transition-colors disabled:opacity-50">
+                            class="px-3 py-1.5 text-[12px] font-medium bg-[var(--accent-color)] text-white rounded-lg hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50">
                             <span x-show="!securityAuditLoading">Run Audit</span>
                             <span x-show="securityAuditLoading"><i data-lucide="loader-2" class="w-3 h-3 inline animate-spin"></i> Running...</span>
                         </button>
@@ -681,7 +716,7 @@ x-transition.opacity
                                 <span x-show="!r.passed" class="text-[var(--warning-color)] shrink-0 mt-0.5">WARN</span>
                                 <div class="min-w-0">
                                     <span class="text-white/70 font-medium" x-text="r.check"></span>
-                                    <p class="text-white/40 break-words" x-text="r.message"></p>
+                                    <p class="text-white/50 break-words" x-text="r.message"></p>
                                 </div>
                             </div>
                         </template>
@@ -696,7 +731,7 @@ x-transition.opacity
                     <div class="flex items-center justify-between">
                         <div>
                             <span class="text-[13px] font-medium">Self-Audit Reports</span>
-                            <p class="text-[11px] text-white/40 mt-0.5">Health and security check history</p>
+                            <p class="text-[11px] text-white/50 mt-0.5">Health and security check history</p>
                         </div>
                         <div class="flex gap-1.5">
                             <button @click="loadSelfAuditReports()"
@@ -704,7 +739,7 @@ x-transition.opacity
                                 Refresh
                             </button>
                             <button @click="triggerSelfAudit()" :disabled="selfAuditRunning"
-                                class="px-3 py-1.5 text-[12px] font-medium bg-[var(--accent-color)]/20 text-[var(--accent-color)] rounded-lg hover:bg-[var(--accent-color)]/30 transition-colors disabled:opacity-50">
+                                class="px-3 py-1.5 text-[12px] font-medium bg-[var(--accent-color)] text-white rounded-lg hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50">
                                 <span x-show="!selfAuditRunning">Run Now</span>
                                 <span x-show="selfAuditRunning"><i data-lucide="loader-2" class="w-3 h-3 inline animate-spin"></i></span>
                             </button>
@@ -722,7 +757,7 @@ x-transition.opacity
                             </button>
                         </template>
                     </div>
-                    <div x-show="selfAuditReports.length === 0" class="text-[11px] text-white/30 py-2 text-center">
+                    <div x-show="selfAuditReports.length === 0" class="text-[11px] text-white/50 py-2 text-center">
                         No reports yet. Click "Run Now" or enable the daemon.
                     </div>
                     <!-- Report Detail -->
@@ -737,7 +772,7 @@ x-transition.opacity
                                 <span x-show="!r.passed" class="text-[var(--warning-color)] shrink-0 mt-0.5">WARN</span>
                                 <div class="min-w-0">
                                     <span class="text-white/70 font-medium" x-text="r.check"></span>
-                                    <p class="text-white/40 break-words" x-text="r.message"></p>
+                                    <p class="text-white/50 break-words" x-text="r.message"></p>
                                 </div>
                             </div>
                         </template>

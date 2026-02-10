@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from pocketclaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
+from pocketclaw.bus.format import convert_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,7 @@ class TeamsAdapter(BaseChannelAdapter):
         """Send a text message to Teams."""
         if not self._adapter:
             return
+        text = convert_markdown(text, self.channel)
         # Teams sending requires a conversation reference — for now, log a warning
         # since actual sending requires the TurnContext from a previous turn
         logger.info("Teams send to %s: %s", chat_id, text[:100])

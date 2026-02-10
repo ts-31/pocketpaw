@@ -28,6 +28,7 @@ from pocketclaw.bus import (
     InboundMessage,
     OutboundMessage,
 )
+from pocketclaw.bus.format import convert_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ class TelegramAdapter(BaseChannelAdapter):
             real_chat_id, topic_id = self._parse_chat_id(chat_id)
             send_kwargs: dict[str, Any] = {
                 "chat_id": real_chat_id,
-                "text": message.content,
+                "text": convert_markdown(message.content, self.channel),
                 "parse_mode": "Markdown",
             }
             if topic_id is not None:
@@ -209,7 +210,8 @@ class TelegramAdapter(BaseChannelAdapter):
     async def _flush_stream_buffer(self, chat_id: str) -> None:
         if chat_id in self._buffers:
             buf = self._buffers[chat_id]
-            await self._update_message(chat_id, buf["message_id"], buf["text"])
+            text = convert_markdown(buf["text"], self.channel)
+            await self._update_message(chat_id, buf["message_id"], text)
             del self._buffers[chat_id]
 
     async def _update_message(self, chat_id: str, message_id: int, text: str) -> None:

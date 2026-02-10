@@ -2,10 +2,15 @@
 Builder for assembling the full agent context.
 Created: 2026-02-02
 Updated: 2026-02-07 - Semantic context injection for mem0 backend
+Updated: 2026-02-10 - Channel-aware format hints
 """
+
+from __future__ import annotations
 
 from pocketclaw.bootstrap.default_provider import DefaultBootstrapProvider
 from pocketclaw.bootstrap.protocol import BootstrapProviderProtocol
+from pocketclaw.bus.events import Channel
+from pocketclaw.bus.format import CHANNEL_FORMAT_HINTS
 from pocketclaw.memory.manager import MemoryManager, get_memory_manager
 
 
@@ -26,13 +31,17 @@ class AgentContextBuilder:
         self.memory = memory_manager or get_memory_manager()
 
     async def build_system_prompt(
-        self, include_memory: bool = True, user_query: str | None = None
+        self,
+        include_memory: bool = True,
+        user_query: str | None = None,
+        channel: Channel | None = None,
     ) -> str:
         """Build the complete system prompt.
 
         Args:
             include_memory: Whether to include memory context.
             user_query: Current user message for semantic memory search (mem0).
+            channel: Target channel for format-aware hints.
         """
         # 1. Load static identity
         context = await self.bootstrap.get_context()
@@ -53,5 +62,11 @@ class AgentContextBuilder:
                     "do NOT call recall unless you need something not listed here)\n"
                     + memory_context
                 )
+
+        # 3. Inject channel format hint
+        if channel:
+            hint = CHANNEL_FORMAT_HINTS.get(channel, "")
+            if hint:
+                parts.append(f"\n# Response Format\n{hint}")
 
         return "\n\n".join(parts)

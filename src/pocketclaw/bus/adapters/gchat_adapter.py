@@ -13,6 +13,7 @@ import asyncio
 import logging
 
 from pocketclaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
+from pocketclaw.bus.format import convert_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,7 @@ class GoogleChatAdapter(BaseChannelAdapter):
 
     async def _send_text(self, space_name: str, text: str) -> None:
         """Send a text message via Chat API."""
+        text = convert_markdown(text, self.channel)
         if not self._chat_service:
             logger.warning("Google Chat service not initialized, cannot send message")
             return
