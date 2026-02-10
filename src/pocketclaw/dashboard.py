@@ -45,6 +45,8 @@ from pocketclaw.memory import MemoryType, get_memory_manager
 from pocketclaw.mission_control.api import router as mission_control_router
 from pocketclaw.scheduler import get_scheduler
 from pocketclaw.security import get_audit_logger
+from pocketclaw.security.rate_limiter import api_limiter, auth_limiter, cleanup_all, ws_limiter
+from pocketclaw.security.session_tokens import create_session_token, verify_session_token
 from pocketclaw.skills import SkillExecutor, get_skill_loader
 from pocketclaw.tunnel import get_tunnel_manager
 
@@ -72,14 +74,42 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # Create FastAPI app
 app = FastAPI(title="PocketPaw Dashboard")
 
-# Allow CORS for WebSocket
+# CORS — restrict to localhost + Cloudflare tunnel subdomains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=(
+        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+        r"|^https://[a-zA-Z0-9-]+\.trycloudflare\.com$"
+    ),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # CSP: allow self + CDN + inline styles/scripts (required by Alpine.js/UnoCSS)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+        "https://cdn.jsdelivr.net https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self' ws: wss:; "
+        "frame-ancestors 'none'"
+    )
+    # HSTS only when accessed via HTTPS (tunnel or reverse proxy)
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
@@ -338,6 +368,16 @@ async def startup_event():
     # Start proactive daemon
     daemon = get_daemon()
     daemon.start(stream_callback=broadcast_intention)
+
+    # Hourly rate-limiter cleanup
+    async def _rate_limit_cleanup_loop():
+        while True:
+            await asyncio.sleep(3600)
+            removed = cleanup_all()
+            if removed:
+                logger.debug("Rate limiter cleanup: removed %d stale entries", removed)
+
+    asyncio.create_task(_rate_limit_cleanup_loop())
 
     # Open browser now that the server is actually listening
     if _open_browser_url:
@@ -1117,6 +1157,39 @@ async def index(request: Request):
 
 # ==================== Auth Middleware ====================
 
+_LOCALHOST_ADDRS = {"127.0.0.1", "localhost", "::1"}
+_PROXY_HEADERS = ("cf-connecting-ip", "x-forwarded-for")
+
+
+def _is_genuine_localhost(request_or_ws) -> bool:
+    """Check if request originates from genuine localhost (not a tunneled proxy).
+
+    When a Cloudflare tunnel is active, requests arrive from cloudflared running
+    on localhost — but they carry proxy headers (Cf-Connecting-Ip / X-Forwarded-For).
+    Those are NOT genuine localhost and must authenticate.
+
+    The ``localhost_auth_bypass`` setting (default True) controls whether genuine
+    localhost connections skip auth.  Set to False to require tokens everywhere.
+    """
+    settings = Settings.load()
+    if not settings.localhost_auth_bypass:
+        return False
+
+    client_host = request_or_ws.client.host if request_or_ws.client else None
+    if client_host not in _LOCALHOST_ADDRS:
+        return False
+
+    # If the tunnel is active, check for proxy headers indicating the request
+    # was forwarded by cloudflared (not a genuine local browser).
+    tunnel = get_tunnel_manager()
+    if tunnel.get_status()["active"]:
+        headers = request_or_ws.headers
+        for hdr in _PROXY_HEADERS:
+            if headers.get(hdr):
+                return False
+
+    return True
+
 
 async def verify_token(
     request: Request,
@@ -1124,8 +1197,6 @@ async def verify_token(
 ):
     """
     Verify access token from query param or Authorization header.
-    Skipped for localhost/127.0.0.1 unless strict mode enabled (future).
-    For now, we enforce it for everyone to ensure the flow works.
     """
     # SKIP AUTH for static files and health checks (if any)
     if request.url.path.startswith("/static") or request.url.path == "/favicon.ico":
@@ -1143,10 +1214,8 @@ async def verify_token(
         if auth_header == f"Bearer {current_token}":
             return True
 
-    # Allow localhost (optional bypass for dev comfort, but stick to Plan 5A strictness)
-    # Allow localhost (Trusted Local Environment)
-    client_host = request.client.host
-    if client_host == "127.0.0.1" or client_host == "localhost":
+    # Allow genuine localhost
+    if _is_genuine_localhost(request):
         return True
 
     raise HTTPException(status_code=401, detail="Unauthorized")
@@ -1154,8 +1223,9 @@ async def verify_token(
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
+    from fastapi.responses import JSONResponse
+
     # Exempt routes
-    # Allow getting QR code to login; allow WhatsApp webhook (Meta verification)
     exempt_paths = [
         "/static",
         "/favicon.ico",
@@ -1166,10 +1236,16 @@ async def auth_middleware(request: Request, call_next):
         "/oauth/callback",
     ]
 
-    # Simple check for static
     for path in exempt_paths:
         if request.url.path.startswith(path):
             return await call_next(request)
+
+    # Rate limiting — pick tier based on path
+    client_ip = request.client.host if request.client else "unknown"
+    is_auth_path = request.url.path in ("/api/auth/session", "/api/qr")
+    limiter = auth_limiter if is_auth_path else api_limiter
+    if not limiter.allow(client_ip):
+        return JSONResponse(status_code=429, content={"detail": "Too many requests"})
 
     # Check for token in query or header
     token = request.query_params.get("token")
@@ -1178,24 +1254,27 @@ async def auth_middleware(request: Request, call_next):
 
     is_valid = False
 
-    # 1. Check Query Param
+    # 1. Check Query Param (master token)
     if token and token == current_token:
         is_valid = True
 
     # 2. Check Header
-    elif auth_header and auth_header == f"Bearer {current_token}":
+    elif auth_header:
+        bearer_value = (
+            auth_header.removeprefix("Bearer ").strip()
+            if auth_header.startswith("Bearer ")
+            else ""
+        )
+        if bearer_value == current_token:
+            is_valid = True
+        elif ":" in bearer_value and verify_session_token(bearer_value, current_token):
+            is_valid = True
+
+    # 3. Allow genuine localhost (not tunneled proxies)
+    elif _is_genuine_localhost(request):
         is_valid = True
 
-    # 3. Allow Localhost (Trusted)
-    elif request.client.host == "127.0.0.1" or request.client.host == "localhost":
-        is_valid = True
-
-    # 3. Allow landing page request (index.html) IF it has the token?
-    # Actually, we want to allow loading index.html so the frontend can check localStorage
-    # and then attach the header. BUT if it's the first visit, we need to allow index.html
-    # so we can execute the JS.
-    # So we should probably allowing "/" but block all "/api/*"
-
+    # Allow frontend assets (/, .js, .css) through for SPA bootstrap
     if (
         request.url.path == "/"
         or request.url.path.endswith(".js")
@@ -1206,13 +1285,37 @@ async def auth_middleware(request: Request, call_next):
     # API Protection
     if request.url.path.startswith("/api") or request.url.path.startswith("/ws"):
         if not is_valid:
-            # For APIs return 401
-            from fastapi.responses import JSONResponse
-
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
     response = await call_next(request)
     return response
+
+
+# ==================== Session Token Exchange ====================
+
+
+@app.post("/api/auth/session")
+async def exchange_session_token(request: Request):
+    """Exchange a master access token for a time-limited session token.
+
+    The client sends the master token in the Authorization header;
+    a short-lived HMAC session token is returned.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    bearer = (
+        auth_header.removeprefix("Bearer ").strip()
+        if auth_header.startswith("Bearer ")
+        else ""
+    )
+    master = get_access_token()
+    if bearer != master:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=401, content={"detail": "Invalid master token"})
+
+    settings = Settings.load()
+    session_token = create_session_token(master, ttl_hours=settings.session_token_ttl_hours)
+    return {"session_token": session_token, "expires_in_hours": settings.session_token_ttl_hours}
 
 
 # ==================== QR Code & Token API ====================
@@ -1438,29 +1541,43 @@ async def websocket_endpoint(
     """WebSocket endpoint for real-time communication.
 
     Auth: accepts token via query param (legacy) OR first message (preferred).
-    Localhost connections bypass auth entirely.
+    Genuine localhost connections bypass auth.
     """
+    # Rate limit WebSocket connections
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    if not ws_limiter.allow(client_ip):
+        await websocket.close(code=4029, reason="Too many connections")
+        return
+
     expected_token = get_access_token()
 
-    # Allow localhost bypass for WebSocket
-    client_host = websocket.client.host
-    is_localhost = client_host == "127.0.0.1" or client_host == "localhost"
+    def _token_valid(t: str | None) -> bool:
+        if not t:
+            return False
+        if t == expected_token:
+            return True
+        # Accept session tokens (format: "expires:hmac")
+        if ":" in t and verify_session_token(t, expected_token):
+            return True
+        return False
 
-    if token != expected_token and not is_localhost:
+    # Allow genuine localhost bypass for WebSocket (not tunneled proxies)
+    is_localhost = _is_genuine_localhost(websocket)
+
+    if not _token_valid(token) and not is_localhost:
         await websocket.close(code=4003, reason="Unauthorized")
         return
 
     # Accept connection first — token can arrive via first message
-    if token == expected_token or is_localhost:
+    if _token_valid(token) or is_localhost:
         await websocket.accept()
     else:
         # Accept temporarily, wait for auth message
         await websocket.accept()
         try:
             first_msg = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)
-            if (
-                first_msg.get("action") == "authenticate"
-                and first_msg.get("token") == expected_token
+            if first_msg.get("action") == "authenticate" and _token_valid(
+                first_msg.get("token")
             ):
                 pass  # Authenticated
             else:

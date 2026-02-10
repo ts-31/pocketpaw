@@ -116,14 +116,31 @@ function app() {
         init() {
             this.log('PocketPaw Dashboard initialized', 'info');
 
-            // Handle Auth Token (URL capture)
+            // Handle Auth Token (URL capture → exchange for session token)
             const urlParams = new URLSearchParams(window.location.search);
-            const token = urlParams.get('token');
-            if (token) {
-                localStorage.setItem('pocketpaw_token', token);
-                // Clean URL
+            const masterToken = urlParams.get('token');
+            if (masterToken) {
+                // Clean URL immediately (don't leave master token visible)
                 window.history.replaceState({}, document.title, window.location.pathname);
-                this.log('Auth token captured and stored', 'success');
+                // Store master token immediately as fallback
+                localStorage.setItem('pocketpaw_token', masterToken);
+                // Exchange master token for a time-limited session token (async)
+                fetch('/api/auth/session', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${masterToken}` }
+                }).then(resp => {
+                    if (resp.ok) return resp.json();
+                    return null;
+                }).then(data => {
+                    if (data && data.session_token) {
+                        localStorage.setItem('pocketpaw_token', data.session_token);
+                        this.log('Session token obtained', 'success');
+                    } else {
+                        this.log('Auth token captured', 'info');
+                    }
+                }).catch(() => {
+                    this.log('Auth token captured (session exchange unavailable)', 'info');
+                });
             }
 
             // --- OVERRIDE FETCH FOR AUTH ---
@@ -142,8 +159,8 @@ function app() {
                 const response = await originalFetch(url, options);
 
                 if (response.status === 401 || response.status === 403) {
-                    this.showToast('Session expired. Please re-authenticate.', 'error');
-                    // Optionally redirect to login page (if we had one)
+                    localStorage.removeItem('pocketpaw_token');
+                    this.showToast('Session expired. Please scan the QR code to re-authenticate.', 'error');
                 }
 
                 return response;

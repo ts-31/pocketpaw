@@ -208,6 +208,13 @@ class Settings(BaseSettings):
     bypass_permissions: bool = Field(
         default=False, description="Skip permission prompts for agent actions (use with caution)"
     )
+    localhost_auth_bypass: bool = Field(
+        default=True,
+        description="Allow unauthenticated localhost access (disable for non-CF proxies)",
+    )
+    session_token_ttl_hours: int = Field(
+        default=24, description="TTL in hours for HMAC session tokens issued via /api/auth/session"
+    )
     file_jail_path: Path = Field(
         default_factory=Path.home, description="Root path for file operations"
     )
@@ -426,6 +433,8 @@ class Settings(BaseSettings):
             "injection_scan_enabled": self.injection_scan_enabled,
             "injection_scan_llm": self.injection_scan_llm,
             "injection_scan_llm_model": self.injection_scan_llm_model,
+            "localhost_auth_bypass": self.localhost_auth_bypass,
+            "session_token_ttl_hours": self.session_token_ttl_hours,
             # Smart routing
             "smart_routing_enabled": self.smart_routing_enabled,
             "model_tier_simple": self.model_tier_simple,

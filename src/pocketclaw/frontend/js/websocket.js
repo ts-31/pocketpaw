@@ -29,12 +29,13 @@ class PocketPawSocket {
 
         this.isConnecting = true;
         const token = localStorage.getItem('pocketpaw_token');
-        let url = `ws://${window.location.host}/ws`;
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let url = `${wsProtocol}//${window.location.host}/ws`;
         const params = [];
         if (token) params.push(`token=${token}`);
         if (resumeSessionId) params.push(`resume_session=${resumeSessionId}`);
         if (params.length > 0) url += '?' + params.join('&');
-        console.log('[WS] Connecting to', `ws://${window.location.host}/ws...`);
+        console.log('[WS] Connecting to', `${wsProtocol}//${window.location.host}/ws...`);
 
         this.ws = new WebSocket(url);
 
