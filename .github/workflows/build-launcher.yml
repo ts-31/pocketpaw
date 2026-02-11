@@ -23,17 +23,20 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            platform: macOS
-            artifact: PocketPaw.dmg
+            platform: macOS-arm64
+            artifact: PocketPaw-macOS-arm64.dmg
           - os: macos-13 # Intel Mac
-            platform: macOS-Intel
-            artifact: PocketPaw.dmg
+            platform: macOS-x64
+            artifact: PocketPaw-macOS-x64.dmg
           - os: windows-latest
             platform: Windows
-            artifact: PocketPaw-Setup.exe
+            artifact: PocketPaw-Windows-Setup.exe
 
     name: Build — ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
+
+    env:
+      POCKETPAW_VERSION: ${{ github.event.inputs.version || github.ref_name || 'dev' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -46,67 +49,81 @@ jobs:
       - name: Install build dependencies
         run: pip install pyinstaller pystray Pillow
 
-      - name: Build with PyInstaller
-        run: python installer/launcher/build/build.py
-
-      # ── macOS: create .dmg ──────────────────────────────────────────
-      - name: Create .dmg (macOS)
-        if: runner.os == 'macOS'
+      # ── macOS: import signing certificate (if available) ────────────
+      - name: Import signing certificate (macOS)
+        if: runner.os == 'macOS' && env.MACOS_SIGNING_CERT_BASE64 != ''
+        env:
+          MACOS_SIGNING_CERT_BASE64: ${{ secrets.MACOS_SIGNING_CERT_BASE64 }}
+          MACOS_SIGNING_CERT_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
         run: |
-          APP_PATH="dist/launcher/PocketPaw.app"
-          DMG_PATH="dist/launcher/PocketPaw.dmg"
+          CERT_FILE=$(mktemp /tmp/cert.XXXXXX.p12)
+          echo "$MACOS_SIGNING_CERT_BASE64" | base64 --decode > "$CERT_FILE"
+          KEYCHAIN="build.keychain"
+          security create-keychain -p "" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security import "$CERT_FILE" -k "$KEYCHAIN" -P "$MACOS_SIGNING_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN"
+          rm -f "$CERT_FILE"
 
-          if [ -d "$APP_PATH" ]; then
-            hdiutil create -volname "PocketPaw" \
-              -srcfolder "$APP_PATH" \
-              -ov -format UDZO \
-              "$DMG_PATH"
-            echo "DMG created: $DMG_PATH"
-          else
-            echo "::warning::.app not found, packaging folder instead"
-            hdiutil create -volname "PocketPaw" \
-              -srcfolder "dist/launcher/PocketPaw" \
-              -ov -format UDZO \
-              "$DMG_PATH"
-          fi
+      # ── Generate icons ──────────────────────────────────────────────
+      - name: Generate platform icons
+        run: python installer/launcher/build-launcher/make_icons.py
 
-      # ── Windows: create installer with Inno Setup ──────────────────
-      - name: Create installer (Windows)
+      # ── Build (handles PyInstaller + DMG/Inno Setup) ────────────────
+      - name: Build launcher
+        run: python installer/launcher/build-launcher/build.py --version "${{ env.POCKETPAW_VERSION }}"
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY || '-' }}
+
+      # ── Windows: run Inno Setup if build.py didn't ─────────────────
+      - name: Create installer (Windows fallback)
         if: runner.os == 'Windows'
         run: |
-          $version = "${{ github.event.inputs.version || github.ref_name || 'dev' }}"
+          if (-not (Test-Path "dist\launcher\PocketPaw-Setup.exe")) {
+            $issPath = "installer\launcher\build-launcher\pocketpaw.iss"
+            if (Test-Path $issPath) {
+              & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DVERSION=${{ env.POCKETPAW_VERSION }}" $issPath
+            }
+          }
+        shell: pwsh
 
-          # Write Inno Setup script
-          @"
-          [Setup]
-          AppName=PocketPaw
-          AppVersion=$version
-          DefaultDirName={autopf}\PocketPaw
-          DefaultGroupName=PocketPaw
-          OutputDir=dist\launcher
-          OutputBaseFilename=PocketPaw-Setup
-          Compression=lzma2
-          SolidCompression=yes
-          SetupIconFile=installer\launcher\assets\icon.ico
-          UninstallDisplayIcon={app}\PocketPaw.exe
-          PrivilegesRequired=lowest
+      # ── Verify artifacts exist ──────────────────────────────────────
+      - name: Verify build artifacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if [ ! -f "dist/launcher/PocketPaw.dmg" ]; then
+            echo "::error::DMG not found at dist/launcher/PocketPaw.dmg"
+            exit 1
+          fi
+          echo "DMG size: $(du -h dist/launcher/PocketPaw.dmg | cut -f1)"
 
-          [Files]
-          Source: "dist\launcher\PocketPaw\*"; DestDir: "{app}"; Flags: recursesubdirs
+      - name: Verify build artifacts (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          if (-not (Test-Path "dist\launcher\PocketPaw-Setup.exe")) {
+            Write-Error "Installer not found at dist\launcher\PocketPaw-Setup.exe"
+            exit 1
+          }
+          $size = (Get-Item "dist\launcher\PocketPaw-Setup.exe").Length / 1MB
+          Write-Host "Installer size: $([math]::Round($size, 1)) MB"
+        shell: pwsh
 
-          [Icons]
-          Name: "{group}\PocketPaw"; Filename: "{app}\PocketPaw.exe"
-          Name: "{autodesktop}\PocketPaw"; Filename: "{app}\PocketPaw.exe"; Tasks: desktopicon
+      # ── Generate checksums ─────────────────────────────────────────
+      - name: Generate checksum (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist/launcher
+          shasum -a 256 PocketPaw.dmg > PocketPaw.dmg.sha256
+          cat PocketPaw.dmg.sha256
 
-          [Tasks]
-          Name: "desktopicon"; Description: "Create desktop shortcut"; GroupDescription: "Additional shortcuts:"
-
-          [Run]
-          Filename: "{app}\PocketPaw.exe"; Description: "Launch PocketPaw"; Flags: nowait postinstall skipifsilent
-          "@ | Out-File -FilePath "setup.iss" -Encoding utf8
-
-          # Inno Setup is pre-installed on GitHub Actions Windows runners
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
+      - name: Generate checksum (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd dist\launcher
+          $hash = Get-FileHash "PocketPaw-Setup.exe" -Algorithm SHA256
+          "$($hash.Hash)  PocketPaw-Setup.exe" | Out-File "PocketPaw-Setup.exe.sha256" -Encoding utf8
+          Get-Content "PocketPaw-Setup.exe.sha256"
         shell: pwsh
 
       # ── Upload artifacts ────────────────────────────────────────────
@@ -115,14 +132,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PocketPaw-${{ matrix.platform }}
-          path: dist/launcher/PocketPaw.dmg
+          path: |
+            dist/launcher/PocketPaw.dmg
+            dist/launcher/PocketPaw.dmg.sha256
 
       - name: Upload Windows installer
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: PocketPaw-${{ matrix.platform }}
-          path: dist/launcher/PocketPaw-Setup.exe
+          path: |
+            dist/launcher/PocketPaw-Setup.exe
+            dist/launcher/PocketPaw-Setup.exe.sha256
 
       # ── Attach to release (if triggered by release) ─────────────────
       - name: Upload to release (macOS)
@@ -132,11 +153,19 @@ jobs:
         run: |
           SUFFIX="${{ matrix.platform }}"
           cp dist/launcher/PocketPaw.dmg "dist/launcher/PocketPaw-${SUFFIX}.dmg"
-          gh release upload "${{ github.ref_name }}" "dist/launcher/PocketPaw-${SUFFIX}.dmg" --clobber
+          cp dist/launcher/PocketPaw.dmg.sha256 "dist/launcher/PocketPaw-${SUFFIX}.dmg.sha256"
+          gh release upload "${{ github.ref_name }}" \
+            "dist/launcher/PocketPaw-${SUFFIX}.dmg" \
+            "dist/launcher/PocketPaw-${SUFFIX}.dmg.sha256" \
+            --clobber
 
       - name: Upload to release (Windows)
         if: github.event_name == 'release' && runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.ref_name }}" "dist/launcher/PocketPaw-Setup.exe" --clobber
+          gh release upload "${{ github.ref_name }}" `
+            "dist/launcher/PocketPaw-Setup.exe" `
+            "dist/launcher/PocketPaw-Setup.exe.sha256" `
+            --clobber
+        shell: pwsh

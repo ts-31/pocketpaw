@@ -61,6 +61,56 @@ PYTHONPATH=. python -m installer.launcher --no-browser --no-tray --port 9999
 | `--port PORT` | Override the dashboard port (default: 8888) |
 | `--extras LIST` | Comma-separated pip extras, e.g. `telegram,discord` (default: `recommended`) |
 | `--reset` | Delete the venv and reinstall from scratch |
+| `--dev` | Install from the `dev` branch instead of PyPI (shortcut for `--branch dev`) |
+| `--branch NAME` | Install from a specific git branch (e.g. `--branch feat/new-thing`) |
+| `--local PATH` | Install from a local directory in editable mode |
+
+## Dev / Branch Testing
+
+Test unreleased code without publishing to PyPI. Useful for QA before a release.
+
+> **Prerequisite (all platforms):** `git` must be installed and on your PATH for `--dev` and `--branch` to work. The `--local` flag does not require git.
+
+### Install from the dev branch
+
+```bash
+# macOS / Linux
+PYTHONPATH=. python -m installer.launcher --dev --no-tray
+
+# Windows (PowerShell)
+$env:PYTHONPATH = "."
+python -m installer.launcher --dev --no-tray
+```
+
+This installs `pocketpaw` from `git+https://github.com/pocketpaw/pocketpaw.git@dev` instead of PyPI.
+
+### Install from any branch
+
+```bash
+PYTHONPATH=. python -m installer.launcher --branch feat/new-feature --no-tray
+```
+
+### Install from a local checkout (editable)
+
+```bash
+# Code changes in the repo are reflected immediately — no reinstall needed
+PYTHONPATH=. python -m installer.launcher --local /path/to/pocketpaw --no-tray
+```
+
+### Force a clean reinstall from dev
+
+```bash
+PYTHONPATH=. python -m installer.launcher --dev --reset --no-tray
+```
+
+### How dev mode works
+
+- A marker file `~/.pocketclaw/.dev-mode` is created when using `--dev`, `--branch`, or `--local`
+- While this marker exists, the **updater** skips PyPI version checks and instead offers to re-pull from the configured branch
+- To switch back to PyPI releases, use `--reset` without `--dev`:
+  ```bash
+  PYTHONPATH=. python -m installer.launcher --reset --no-tray
+  ```
 
 ## Building
 
@@ -134,9 +184,8 @@ Triggered on:
 
 ### Updates (`updater.py`)
 
-- Fetches `https://pypi.org/pypi/pocketpaw/json` for the latest version
-- Compares with the installed version in the venv
-- Applies via `pip install --upgrade pocketpaw`
+- **PyPI mode (default):** Fetches `https://pypi.org/pypi/pocketpaw/json` for the latest version, compares with installed, applies via `pip install --upgrade pocketpaw`
+- **Dev mode (`--dev` / `--branch`):** Skips PyPI checks, always offers "re-pull from branch", applies via `pip install --force-reinstall` from the git URL
 
 ## File locations
 
@@ -146,6 +195,7 @@ Triggered on:
 | `~/.pocketclaw/config.json` | PocketPaw configuration |
 | `~/.pocketclaw/launcher.pid` | Server process PID |
 | `~/.pocketclaw/logs/launcher.log` | Launcher log file |
+| `~/.pocketclaw/.dev-mode` | Dev mode marker (present when `--dev`/`--branch`/`--local` was used) |
 | `~/.pocketclaw/python/` | Embedded Python (Windows only) |
 
 ## Tests

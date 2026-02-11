@@ -1,11 +1,15 @@
 # PocketPaw Desktop Launcher — System Tray
 # Cross-platform tray icon using pystray.
-# Menu: Open Dashboard, Start/Stop, Check Updates, Quit.
+# Menu: version, dashboard, start/stop/restart, auto-start, updates, logs,
+#       uninstall, quit.
 # Created: 2026-02-10
 
 from __future__ import annotations
 
 import logging
+import os
+import platform
+import subprocess
 import threading
 import webbrowser
 from pathlib import Path
@@ -27,6 +31,20 @@ try:
 except ImportError:
     HAS_TRAY = False
     logger.warning("pystray or Pillow not available — tray icon disabled")
+
+from installer.launcher.common import POCKETCLAW_HOME
+
+LOG_FILE = POCKETCLAW_HOME / "logs" / "launcher.log"
+
+
+def _get_version() -> str:
+    """Get the launcher version string."""
+    try:
+        from . import __version__
+
+        return __version__
+    except Exception:
+        return "0.1.0"
 
 
 def _load_icon() -> Image.Image | None:
@@ -57,6 +75,16 @@ class TrayIcon:
         self.updater = updater
         self._icon: pystray.Icon | None = None
         self._update_available = False
+        self._version = _get_version()
+
+        # Auto-start manager (lazy init to avoid import errors if module is missing)
+        self._autostart = None
+        try:
+            from .autostart import AutoStartManager
+
+            self._autostart = AutoStartManager()
+        except Exception:
+            logger.debug("AutoStartManager not available")
 
     def run(self) -> None:
         """Start the tray icon. Blocks until quit is selected."""
@@ -72,13 +100,17 @@ class TrayIcon:
         self._icon = pystray.Icon(
             name="PocketPaw",
             icon=icon_image,
-            title="PocketPaw",
+            title=self._get_tooltip(),
             menu=self._build_menu(),
         )
 
         # Start periodic update check in background
         check_thread = threading.Thread(target=self._periodic_update_check, daemon=True)
         check_thread.start()
+
+        # Start tooltip updater
+        tooltip_thread = threading.Thread(target=self._update_tooltip_loop, daemon=True)
+        tooltip_thread.start()
 
         logger.info("System tray icon started")
         self._icon.run()
@@ -88,15 +120,59 @@ class TrayIcon:
         if self._icon:
             self._icon.stop()
 
+    # ── Tooltip ─────────────────────────────────────────────────────────
+
+    def _get_tooltip(self) -> str:
+        """Dynamic tooltip showing current status."""
+        if self.server.is_running():
+            port = getattr(self.server, "port", None) or "8888"
+            return f"PocketPaw v{self._version} — Running on port {port}"
+        return f"PocketPaw v{self._version} — Stopped"
+
+    def _update_tooltip_loop(self) -> None:
+        """Periodically update the tooltip text."""
+        import time
+
+        while True:
+            time.sleep(5)
+            if self._icon:
+                try:
+                    self._icon.title = self._get_tooltip()
+                except Exception:
+                    pass
+
     # ── Menu ───────────────────────────────────────────────────────────
 
     def _build_menu(self) -> pystray.Menu:
-        """Build the tray context menu."""
-        return pystray.Menu(
+        """Build the tray context menu.
+
+        Layout:
+          PocketPaw v0.x.x  (disabled)
+          ──────────────────
+          Open Dashboard     (default / double-click)
+          ──────────────────
+          Start/Stop Server
+          Restart Server
+          ──────────────────
+          Start on Login     (checkable, if available)
+          Check for Updates
+          View Logs...
+          ──────────────────
+          Uninstall...
+          Quit PocketPaw
+        """
+        items: list = [
+            # Version display (disabled, informational)
+            pystray.MenuItem(
+                f"PocketPaw v{self._version}",
+                None,
+                enabled=False,
+            ),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Open Dashboard",
                 self._on_open_dashboard,
-                default=True,  # Double-click action
+                default=True,
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
@@ -108,16 +184,41 @@ class TrayIcon:
                 self._on_restart,
             ),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                self._update_text,
-                self._on_check_update,
-            ),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                "Quit PocketPaw",
-                self._on_quit,
-            ),
+        ]
+
+        # Auto-start toggle (if available)
+        if self._autostart is not None:
+            items.append(
+                pystray.MenuItem(
+                    "Start on Login",
+                    self._on_toggle_autostart,
+                    checked=lambda item: self._autostart.is_enabled(),
+                ),
+            )
+
+        items.extend(
+            [
+                pystray.MenuItem(
+                    self._update_text,
+                    self._on_check_update,
+                ),
+                pystray.MenuItem(
+                    "View Logs...",
+                    self._on_view_logs,
+                ),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem(
+                    "Uninstall...",
+                    self._on_uninstall,
+                ),
+                pystray.MenuItem(
+                    "Quit PocketPaw",
+                    self._on_quit,
+                ),
+            ]
         )
+
+        return pystray.Menu(*items)
 
     def _server_toggle_text(self, item: pystray.MenuItem) -> str:
         """Dynamic text for start/stop menu item."""
@@ -164,6 +265,17 @@ class TrayIcon:
         """Restart the server."""
         threading.Thread(target=self.server.restart, daemon=True).start()
 
+    def _on_toggle_autostart(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        """Toggle auto-start on login."""
+        if self._autostart is None:
+            return
+        if self._autostart.is_enabled():
+            self._autostart.disable()
+        else:
+            self._autostart.enable()
+        if self._icon:
+            self._icon.update_menu()
+
     def _on_check_update(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         """Check for updates and apply if available."""
         threading.Thread(target=self._do_update, daemon=True).start()
@@ -184,6 +296,51 @@ class TrayIcon:
                 self._notify("PocketPaw Updated", f"Updated to v{info.latest_version}")
         else:
             self._notify("No Updates", "PocketPaw is up to date")
+
+    def _on_view_logs(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        """Open the launcher log file in the default text editor."""
+        if not LOG_FILE.exists():
+            self._notify("No Logs", "Log file not found")
+            return
+
+        try:
+            system = platform.system()
+            if system == "Darwin":
+                subprocess.Popen(["open", str(LOG_FILE)])
+            elif system == "Windows":
+                os.startfile(str(LOG_FILE))  # noqa: S606
+            else:
+                subprocess.Popen(["xdg-open", str(LOG_FILE)])
+        except Exception as exc:
+            logger.warning("Failed to open log file: %s", exc)
+
+    def _on_uninstall(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        """Launch interactive uninstaller in a console."""
+        threading.Thread(target=self._do_uninstall, daemon=True).start()
+
+    def _do_uninstall(self) -> None:
+        """Run the uninstaller."""
+        try:
+            from .uninstall import Uninstaller
+
+            self.server.stop()
+            uninstaller = Uninstaller()
+            # Non-interactive: remove safe components only
+            results = uninstaller.uninstall(
+                remove_venv=True,
+                remove_uv=True,
+                remove_python=True,
+                remove_logs=True,
+                remove_config=False,
+                remove_memory=False,
+            )
+            for r in results:
+                logger.info("Uninstall: %s", r)
+            self._notify("Uninstall Complete", "PocketPaw components removed")
+            self.stop()
+        except Exception as exc:
+            logger.error("Uninstall failed: %s", exc)
+            self._notify("Uninstall Failed", str(exc))
 
     def _on_quit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         """Quit: stop server and exit."""

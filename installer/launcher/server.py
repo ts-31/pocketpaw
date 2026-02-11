@@ -14,21 +14,19 @@ import socket
 import subprocess
 import time
 import urllib.request
-from collections.abc import Callable
 from pathlib import Path
+
+from installer.launcher.common import (
+    POCKETCLAW_HOME,
+    VENV_DIR,
+    StatusCallback,
+    noop_status,
+)
 
 logger = logging.getLogger(__name__)
 
-POCKETCLAW_HOME = Path.home() / ".pocketclaw"
-VENV_DIR = POCKETCLAW_HOME / "venv"
 PID_FILE = POCKETCLAW_HOME / "launcher.pid"
 DEFAULT_PORT = 8888
-
-StatusCallback = Callable[[str], None]
-
-
-def _noop_status(msg: str) -> None:
-    pass
 
 
 class ServerManager:
@@ -36,13 +34,20 @@ class ServerManager:
 
     def __init__(self, port: int | None = None, on_status: StatusCallback | None = None) -> None:
         self.port = port or self._read_port_from_config() or DEFAULT_PORT
-        self.on_status = on_status or _noop_status
+        self.on_status = on_status or noop_status
         self._process: subprocess.Popen | None = None
+        self._log_fh = None
+        self._lock = __import__("threading").Lock()
 
     # ── Public API ─────────────────────────────────────────────────────
 
     def start(self) -> bool:
         """Start the PocketPaw server. Returns True on success."""
+        with self._lock:
+            return self._start_locked()
+
+    def _start_locked(self) -> bool:
+        """Start the server (must be called under self._lock)."""
         if self.is_running():
             self.on_status("Server is already running")
             return True
@@ -61,13 +66,16 @@ class ServerManager:
         logger.info("Starting server: %s -m pocketclaw --port %d", python, self.port)
 
         try:
-            # Start the server process
+            # Start the server process — redirect output to a log file
+            # instead of PIPE to avoid OS pipe buffer deadlock (64KB limit)
+            log_file = POCKETCLAW_HOME / "server.log"
+            self._log_fh = open(log_file, "a", encoding="utf-8")  # noqa: SIM115
             env = self._build_env()
             self._process = subprocess.Popen(
                 [str(python), "-m", "pocketclaw", "--port", str(self.port)],
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=self._log_fh,
+                stderr=self._log_fh,
                 # Don't inherit the launcher's console on Windows
                 creationflags=self._creation_flags(),
             )
@@ -76,7 +84,8 @@ class ServerManager:
             PID_FILE.write_text(str(self._process.pid))
 
             # Wait for the server to become healthy
-            if self._wait_for_healthy(timeout=30):
+            # pocketclaw needs ~25s for startup + internal setup
+            if self._wait_for_healthy(timeout=60):
                 self.on_status(f"PocketPaw running on port {self.port}")
                 return True
             else:
@@ -94,17 +103,26 @@ class ServerManager:
 
     def stop(self) -> None:
         """Stop the PocketPaw server."""
-        self.on_status("Stopping PocketPaw...")
+        with self._lock:
+            self.on_status("Stopping PocketPaw...")
 
-        if self._process and self._process.poll() is None:
-            self._graceful_shutdown(self._process)
-            self._process = None
-        else:
-            # Try to stop via PID file
-            self._stop_via_pid()
+            if self._process and self._process.poll() is None:
+                self._graceful_shutdown(self._process)
+                self._process = None
+            else:
+                # Try to stop via PID file
+                self._stop_via_pid()
 
-        PID_FILE.unlink(missing_ok=True)
-        self.on_status("PocketPaw stopped")
+            # Close log file handle
+            if self._log_fh:
+                try:
+                    self._log_fh.close()
+                except Exception:
+                    pass
+                self._log_fh = None
+
+            PID_FILE.unlink(missing_ok=True)
+            self.on_status("PocketPaw stopped")
 
     def restart(self) -> bool:
         """Restart the server."""
@@ -161,8 +179,28 @@ class ServerManager:
             venv_bin = str(VENV_DIR / "Scripts")
         else:
             venv_bin = str(VENV_DIR / "bin")
-        env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
+
+        # Also add the uv directory so pocketclaw's auto_install can find uv
+        uv_dir = str(POCKETCLAW_HOME / "uv")
+        env["PATH"] = venv_bin + os.pathsep + uv_dir + os.pathsep + env.get("PATH", "")
+
         env["VIRTUAL_ENV"] = str(VENV_DIR)
+        # Force UTF-8 so emoji/unicode in pocketclaw output doesn't crash
+        # on Windows (default cp1252 can't encode them)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+
+        # Set UV_OVERRIDE so any uv invocation (including pocketclaw's
+        # internal auto_install) uses our tiktoken override
+        overrides_file = POCKETCLAW_HOME / "uv-overrides.txt"
+        if not overrides_file.exists():
+            # Ensure the overrides file exists even if bootstrap was skipped
+            try:
+                overrides_file.write_text("tiktoken>=0.7.0\n", encoding="utf-8")
+            except OSError:
+                pass
+        env["UV_OVERRIDE"] = str(overrides_file)
+
         return env
 
     def _creation_flags(self) -> int:
@@ -177,8 +215,20 @@ class ServerManager:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._process and self._process.poll() is not None:
-                # Process died
-                logger.error("Server process exited with code %d", self._process.returncode)
+                # Process died — read last lines from the log file
+                rc = self._process.returncode
+                log_tail = ""
+                try:
+                    log_file = POCKETCLAW_HOME / "server.log"
+                    if log_file.exists():
+                        log_tail = log_file.read_text(encoding="utf-8", errors="replace")[-2000:]
+                except Exception:
+                    pass
+                logger.error(
+                    "Server process exited with code %d\n%s",
+                    rc,
+                    log_tail,
+                )
                 return False
             if self.is_healthy():
                 return True

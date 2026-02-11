@@ -4,7 +4,7 @@
 # Updated: 2026-02-07 - Configurable providers, auto-learn, semantic context - Memory System
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -201,7 +201,7 @@ class MemoryManager:
             type=MemoryType.DAILY,
             content=content,
             tags=tags or [],
-            metadata={"header": datetime.now().strftime("%H:%M")},
+            metadata={"header": datetime.now(tz=UTC).strftime("%H:%M")},
         )
         return await self._store.save(entry)
 
@@ -604,5 +604,13 @@ def get_memory_manager(force_reload: bool = False) -> MemoryManager:
             anthropic_api_key=settings.anthropic_api_key,
             openai_api_key=settings.openai_api_key,
         )
+
+        from pocketclaw.lifecycle import register
+
+        def _reset():
+            global _manager
+            _manager = None
+
+        register("memory_manager", reset=_reset)
 
     return _manager

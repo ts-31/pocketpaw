@@ -459,9 +459,7 @@ class Settings(BaseSettings):
             "tts_voice": self.tts_voice,
             "stt_model": self.stt_model,
             # Spotify
-            "spotify_client_id": (
-                self.spotify_client_id or existing.get("spotify_client_id")
-            ),
+            "spotify_client_id": (self.spotify_client_id or existing.get("spotify_client_id")),
             "spotify_client_secret": (
                 self.spotify_client_secret or existing.get("spotify_client_secret")
             ),
@@ -498,14 +496,16 @@ class Settings(BaseSettings):
             "max_concurrent_conversations": self.max_concurrent_conversations,
         }
 
-        # Save all fields to config.json (file is chmod 600)
-        # Additionally store secrets in the encrypted credential store
+        # Store secrets in the encrypted credential store, then strip
+        # them from the dict before writing config.json to prevent
+        # plaintext secret leakage.
         store = get_credential_store()
         for key, value in all_fields.items():
             if key in SECRET_FIELDS and value:
                 store.set(key, value)
 
-        config_path.write_text(json.dumps(all_fields, indent=2))
+        safe_fields = {k: v for k, v in all_fields.items() if k not in SECRET_FIELDS}
+        config_path.write_text(json.dumps(safe_fields, indent=2))
         _chmod_safe(config_path, 0o600)
 
     @classmethod
@@ -612,9 +612,7 @@ def _migrate_plaintext_keys() -> None:
             migrated_count += 1
 
     if migrated_count:
-        logger.info(
-            "Copied %d secret(s) from config to encrypted store.", migrated_count
-        )
+        logger.info("Copied %d secret(s) from config to encrypted store.", migrated_count)
 
     _MIGRATION_DONE_PATH.write_text("1")
     _chmod_safe(_MIGRATION_DONE_PATH, 0o600)

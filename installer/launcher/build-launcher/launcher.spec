@@ -4,15 +4,21 @@
 #
 # Usage:
 #   pip install pyinstaller pystray Pillow
-#   pyinstaller installer/launcher/build/launcher.spec
+#   python installer/launcher/build-launcher/build.py --version 0.3.0
 #
 # Output: dist/PocketPaw/ (folder mode for fast startup)
 
+import os
 import platform
 from pathlib import Path
 
+# Version from environment (set by build.py)
+VERSION = os.environ.get("POCKETPAW_VERSION", "0.1.0")
+
 # Paths
-LAUNCHER_DIR = Path("installer/launcher")
+# SPECPATH is provided by PyInstaller and points to the directory containing this spec file
+ROOT_DIR = Path(SPECPATH).parent.parent.parent  # Go up to repo root
+LAUNCHER_DIR = ROOT_DIR / "installer" / "launcher"
 ASSETS_DIR = LAUNCHER_DIR / "assets"
 
 # Collect data files (icon, etc.)
@@ -33,7 +39,7 @@ else:
 
 a = Analysis(
     [str(LAUNCHER_DIR / "__main__.py")],
-    pathex=["."],
+    pathex=[str(LAUNCHER_DIR.parent), "."],
     datas=datas,
     hiddenimports=[
         "pystray",
@@ -42,12 +48,17 @@ a = Analysis(
         "PIL.Image",
         "tkinter",
         "tkinter.ttk",
-        # Launcher modules
+        # Launcher modules — both package paths so PyInstaller collects them
+        "launcher",
+        "launcher.__init__",
+        "launcher.__main__",
         "launcher.bootstrap",
         "launcher.server",
         "launcher.tray",
         "launcher.splash",
         "launcher.updater",
+        "launcher.autostart",
+        "launcher.uninstall",
     ],
     excludes=[
         # Don't bundle heavy stuff — pocketpaw goes in the venv, not here
@@ -99,10 +110,10 @@ if platform.system() == "Darwin":
         info_plist={
             "CFBundleName": "PocketPaw",
             "CFBundleDisplayName": "PocketPaw",
-            "CFBundleVersion": "0.1.0",
-            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleVersion": VERSION,
+            "CFBundleShortVersionString": VERSION,
             "LSBackgroundOnly": False,
-            "LSUIElement": True,  # Hide from Dock, show in menu bar
+            "LSMinimumSystemVersion": "12.0",
             "NSHighResolutionCapable": True,
         },
     )
