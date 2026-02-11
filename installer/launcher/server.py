@@ -14,21 +14,19 @@ import socket
 import subprocess
 import time
 import urllib.request
-from collections.abc import Callable
 from pathlib import Path
+
+from installer.launcher.common import (
+    POCKETCLAW_HOME,
+    VENV_DIR,
+    StatusCallback,
+    noop_status,
+)
 
 logger = logging.getLogger(__name__)
 
-POCKETCLAW_HOME = Path.home() / ".pocketclaw"
-VENV_DIR = POCKETCLAW_HOME / "venv"
 PID_FILE = POCKETCLAW_HOME / "launcher.pid"
 DEFAULT_PORT = 8888
-
-StatusCallback = Callable[[str], None]
-
-
-def _noop_status(msg: str) -> None:
-    pass
 
 
 class ServerManager:
@@ -36,13 +34,20 @@ class ServerManager:
 
     def __init__(self, port: int | None = None, on_status: StatusCallback | None = None) -> None:
         self.port = port or self._read_port_from_config() or DEFAULT_PORT
-        self.on_status = on_status or _noop_status
+        self.on_status = on_status or noop_status
         self._process: subprocess.Popen | None = None
+        self._log_fh = None
+        self._lock = __import__("threading").Lock()
 
     # ── Public API ─────────────────────────────────────────────────────
 
     def start(self) -> bool:
         """Start the PocketPaw server. Returns True on success."""
+        with self._lock:
+            return self._start_locked()
+
+    def _start_locked(self) -> bool:
+        """Start the server (must be called under self._lock)."""
         if self.is_running():
             self.on_status("Server is already running")
             return True
@@ -61,13 +66,16 @@ class ServerManager:
         logger.info("Starting server: %s -m pocketclaw --port %d", python, self.port)
 
         try:
-            # Start the server process
+            # Start the server process — redirect output to a log file
+            # instead of PIPE to avoid OS pipe buffer deadlock (64KB limit)
+            log_file = POCKETCLAW_HOME / "server.log"
+            self._log_fh = open(log_file, "a", encoding="utf-8")  # noqa: SIM115
             env = self._build_env()
             self._process = subprocess.Popen(
                 [str(python), "-m", "pocketclaw", "--port", str(self.port)],
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=self._log_fh,
+                stderr=self._log_fh,
                 # Don't inherit the launcher's console on Windows
                 creationflags=self._creation_flags(),
             )
@@ -95,17 +103,26 @@ class ServerManager:
 
     def stop(self) -> None:
         """Stop the PocketPaw server."""
-        self.on_status("Stopping PocketPaw...")
+        with self._lock:
+            self.on_status("Stopping PocketPaw...")
 
-        if self._process and self._process.poll() is None:
-            self._graceful_shutdown(self._process)
-            self._process = None
-        else:
-            # Try to stop via PID file
-            self._stop_via_pid()
+            if self._process and self._process.poll() is None:
+                self._graceful_shutdown(self._process)
+                self._process = None
+            else:
+                # Try to stop via PID file
+                self._stop_via_pid()
 
-        PID_FILE.unlink(missing_ok=True)
-        self.on_status("PocketPaw stopped")
+            # Close log file handle
+            if self._log_fh:
+                try:
+                    self._log_fh.close()
+                except Exception:
+                    pass
+                self._log_fh = None
+
+            PID_FILE.unlink(missing_ok=True)
+            self.on_status("PocketPaw stopped")
 
     def restart(self) -> bool:
         """Restart the server."""
@@ -198,18 +215,19 @@ class ServerManager:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._process and self._process.poll() is not None:
-                # Process died — capture output for debugging
+                # Process died — read last lines from the log file
                 rc = self._process.returncode
-                stderr_out = ""
+                log_tail = ""
                 try:
-                    _, stderr_bytes = self._process.communicate(timeout=2)
-                    stderr_out = stderr_bytes.decode("utf-8", errors="replace")[-2000:]
+                    log_file = POCKETCLAW_HOME / "server.log"
+                    if log_file.exists():
+                        log_tail = log_file.read_text(encoding="utf-8", errors="replace")[-2000:]
                 except Exception:
                     pass
                 logger.error(
                     "Server process exited with code %d\n%s",
                     rc,
-                    stderr_out,
+                    log_tail,
                 )
                 return False
             if self.is_healthy():

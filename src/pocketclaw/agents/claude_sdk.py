@@ -588,7 +588,8 @@ class ClaudeAgentSDK:
             # there is no terminal to show interactive permission prompts.
             # bypassPermissions auto-approves ALL tool calls (including MCP).
             # Dangerous Bash commands are still caught by the PreToolUse hook.
-            options_kwargs["permission_mode"] = "bypassPermissions"
+            if self.settings.bypass_permissions:
+                options_kwargs["permission_mode"] = "bypassPermissions"
 
             # Smart model routing (opt-in)
             if self.settings.smart_routing_enabled:

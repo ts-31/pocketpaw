@@ -32,7 +32,9 @@ except ImportError:
     HAS_TRAY = False
     logger.warning("pystray or Pillow not available — tray icon disabled")
 
-LOG_FILE = Path.home() / ".pocketclaw" / "logs" / "launcher.log"
+from installer.launcher.common import POCKETCLAW_HOME
+
+LOG_FILE = POCKETCLAW_HOME / "logs" / "launcher.log"
 
 
 def _get_version() -> str:
@@ -123,7 +125,7 @@ class TrayIcon:
     def _get_tooltip(self) -> str:
         """Dynamic tooltip showing current status."""
         if self.server.is_running():
-            port = getattr(self.server, "_port", None) or "8888"
+            port = getattr(self.server, "port", None) or "8888"
             return f"PocketPaw v{self._version} — Running on port {port}"
         return f"PocketPaw v{self._version} — Stopped"
 

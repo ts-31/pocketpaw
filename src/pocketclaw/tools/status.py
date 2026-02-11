@@ -1,7 +1,7 @@
 """System status tool."""
 
 import platform
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 
 def get_system_status() -> str:
@@ -32,8 +32,8 @@ def get_system_status() -> str:
     disk_total_gb = disk.total / (1024**3)
 
     # Uptime
-    boot_time = datetime.fromtimestamp(psutil.boot_time())
-    uptime = datetime.now() - boot_time
+    boot_time = datetime.fromtimestamp(psutil.boot_time(), tz=UTC)
+    uptime = datetime.now(tz=UTC) - boot_time
     uptime_str = str(timedelta(seconds=int(uptime.total_seconds())))
 
     # Battery (if available)

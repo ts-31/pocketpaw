@@ -9,9 +9,9 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from installer.launcher.common import POCKETCLAW_HOME
 
-POCKETCLAW_HOME = Path.home() / ".pocketclaw"
+logger = logging.getLogger(__name__)
 
 
 @dataclass

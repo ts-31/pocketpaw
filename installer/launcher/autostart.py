@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from installer.launcher.common import POCKETCLAW_HOME
+
 logger = logging.getLogger(__name__)
 
 APP_ID = "com.pocketpaw.launcher"
@@ -18,11 +20,17 @@ APP_NAME = "PocketPaw"
 
 
 def get_executable_path() -> str:
-    """Get the path to the current executable (frozen or source)."""
+    """Get the path to the current executable (frozen or source).
+
+    For frozen (PyInstaller) builds, returns the executable path.
+    For source runs, returns the Python interpreter path.
+    Callers should check _is_frozen() to know whether to append module args.
+    """
     if getattr(sys, "frozen", False):
-        # PyInstaller frozen executable
+        # PyInstaller frozen executable — single binary
         return sys.executable
-    # Running from source: use the Python interpreter + module
+    # Running from source: return the Python interpreter.
+    # Callers append "-m installer.launcher" for the full command.
     return sys.executable
 
 
@@ -85,8 +93,8 @@ class AutoStartManager:
             "ProgramArguments": program_args,
             "RunAtLoad": True,
             "KeepAlive": False,
-            "StandardOutPath": str(Path.home() / ".pocketclaw" / "logs" / "launcher-launchd.log"),
-            "StandardErrorPath": str(Path.home() / ".pocketclaw" / "logs" / "launcher-launchd.log"),
+            "StandardOutPath": str(POCKETCLAW_HOME / "logs" / "launcher-launchd.log"),
+            "StandardErrorPath": str(POCKETCLAW_HOME / "logs" / "launcher-launchd.log"),
         }
 
     def _macos_is_enabled(self) -> bool:

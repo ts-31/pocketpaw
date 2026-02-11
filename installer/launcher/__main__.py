@@ -50,7 +50,9 @@ if __package__ is None or __package__ == "":
         sys.modules["launcher"] = pkg
 
 # Set up logging before imports
-LOG_DIR = Path.home() / ".pocketclaw" / "logs"
+from installer.launcher.common import POCKETCLAW_HOME
+
+LOG_DIR = POCKETCLAW_HOME / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "launcher.log"
 
@@ -157,7 +159,8 @@ def main() -> int:
         return 0
 
     # Import our modules
-    from .bootstrap import VENV_DIR, Bootstrap
+    from .bootstrap import Bootstrap
+    from .common import VENV_DIR
     from .server import ServerManager
     from .updater import Updater
 

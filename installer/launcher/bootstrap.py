@@ -17,19 +17,21 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from installer.launcher.common import (
+    DEV_MODE_MARKER,
+    GIT_REPO_URL,
+    PACKAGE_NAME,
+    POCKETCLAW_HOME,
+    UV_DIR,
+    VENV_DIR,
+    find_uv,
+    get_installed_version,
+)
+
 logger = logging.getLogger(__name__)
 
-# Where everything lives
-POCKETCLAW_HOME = Path.home() / ".pocketclaw"
-VENV_DIR = POCKETCLAW_HOME / "venv"
-UV_DIR = POCKETCLAW_HOME / "uv"
 EMBEDDED_PYTHON_DIR = POCKETCLAW_HOME / "python"
-PACKAGE_NAME = "pocketpaw"
-GIT_REPO_URL = "https://github.com/pocketpaw/pocketpaw.git"
 MIN_PYTHON = (3, 11)
-
-# Dev mode marker file — when present, updater knows to skip PyPI checks
-DEV_MODE_MARKER = POCKETCLAW_HOME / ".dev-mode"
 
 # Python embeddable package URL template for Windows
 # Format: python-{version}-embed-{arch}.zip
@@ -231,7 +233,11 @@ class Bootstrap:
                 source_label = f"PocketPaw (branch: {branch})"
             self.progress(f"Installing {source_label}...", 45)
             install_err = self._install_pocketpaw(
-                str(venv_python), extras, uv, branch=branch, local_path=local_path,
+                str(venv_python),
+                extras,
+                uv,
+                branch=branch,
+                local_path=local_path,
             )
             if install_err:
                 status.error = install_err
@@ -354,6 +360,11 @@ class Bootstrap:
 
             self.progress("Extracting Python...", 20)
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                # Validate all member paths before extracting (Zip Slip prevention)
+                for member in zf.namelist():
+                    target = (EMBEDDED_PYTHON_DIR / member).resolve()
+                    if not str(target).startswith(str(EMBEDDED_PYTHON_DIR.resolve())):
+                        raise ValueError(f"Zip Slip detected: '{member}' escapes target directory")
                 zf.extractall(EMBEDDED_PYTHON_DIR)
 
             # Enable pip in the embedded Python by uncommenting import site
@@ -397,17 +408,7 @@ class Bootstrap:
 
     def _find_uv(self) -> str | None:
         """Find uv on the system or in our download location."""
-        # Check our downloaded copy first
-        local_uv = self._uv_path()
-        if local_uv.exists():
-            return str(local_uv)
-
-        # Check system PATH
-        system_uv = shutil.which("uv")
-        if system_uv:
-            return system_uv
-
-        return None
+        return find_uv()
 
     def _ensure_uv(self) -> str | None:
         """Find or download uv. Returns path to uv binary or None."""
@@ -468,7 +469,7 @@ class Bootstrap:
 
     # ── Virtual Environment ────────────────────────────────────────────
 
-    def _venv_python(self) -> Path | None:
+    def _venv_python(self) -> Path:
         """Path to the Python executable inside the venv."""
         if platform.system() == "Windows":
             return VENV_DIR / "Scripts" / "python.exe"
@@ -556,7 +557,11 @@ class Bootstrap:
             return f"Executable not found: {exc}"
 
     def _install_with_uv(
-        self, uv: str, venv_python: str, pkg: str, editable: bool = False,
+        self,
+        uv: str,
+        venv_python: str,
+        pkg: str,
+        editable: bool = False,
     ) -> str | None:
         """Install a package using uv pip install with dependency overrides."""
         # Write overrides file so uv can loosen transitive pins
@@ -611,7 +616,10 @@ class Bootstrap:
         return self._install_with_pip(venv_python, pkg, editable=editable)
 
     def _install_with_pip(
-        self, venv_python: str, pkg: str, editable: bool = False,
+        self,
+        venv_python: str,
+        pkg: str,
+        editable: bool = False,
     ) -> str | None:
         """Install a package using pip (fallback)."""
         # Make sure pip is up to date first
@@ -660,25 +668,4 @@ class Bootstrap:
         uv: str | None = None,
     ) -> str | None:
         """Get the installed pocketpaw version from the venv."""
-        try:
-            if uv:
-                result = subprocess.run(
-                    [uv, "pip", "show", PACKAGE_NAME, "--python", venv_python],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-            else:
-                result = subprocess.run(
-                    [venv_python, "-m", "pip", "show", PACKAGE_NAME],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-            if result.returncode == 0:
-                for line in result.stdout.splitlines():
-                    if line.lower().startswith("version:"):
-                        return line.split(":", 1)[1].strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-        return None
+        return get_installed_version(python=venv_python, uv=uv)

@@ -20,7 +20,6 @@ import logging
 from pocketclaw.agents.router import AgentRouter
 from pocketclaw.bootstrap import AgentContextBuilder
 from pocketclaw.bus import InboundMessage, OutboundMessage, SystemEvent, get_message_bus
-from pocketclaw.bus.events import Channel
 from pocketclaw.config import Settings, get_settings
 from pocketclaw.memory import get_memory_manager
 from pocketclaw.security.injection_scanner import ThreatLevel, get_injection_scanner
@@ -67,6 +66,7 @@ class AgentLoop:
         # Concurrency controls
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._global_semaphore = asyncio.Semaphore(self.settings.max_concurrent_conversations)
+        self._background_tasks: set[asyncio.Task] = set()
 
         self._running = False
 
@@ -99,7 +99,9 @@ class AgentLoop:
                 continue
 
             # 2. Process message in background task (to not block loop)
-            asyncio.create_task(self._process_message(message))
+            task = asyncio.create_task(self._process_message(message))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
     async def _process_message(self, message: InboundMessage) -> None:
         """Process a single message flow using AgentRouter."""
@@ -111,8 +113,13 @@ class AgentLoop:
             # Per-session lock — serializes messages within the same session
             if session_key not in self._session_locks:
                 self._session_locks[session_key] = asyncio.Lock()
-            async with self._session_locks[session_key]:
+            lock = self._session_locks[session_key]
+            async with lock:
                 await self._process_message_inner(message, session_key)
+
+            # Clean up lock if no one else is waiting on it
+            if not lock.locked():
+                self._session_locks.pop(session_key, None)
 
     async def _process_message_inner(self, message: InboundMessage, session_key: str) -> None:
         """Inner message processing (called under concurrency guards)."""
@@ -349,13 +356,13 @@ class AgentLoop:
                 # 6. Auto-learn: extract facts from conversation (non-blocking)
                 should_auto_learn = (
                     self.settings.memory_backend == "mem0" and self.settings.mem0_auto_learn
-                ) or (
-                    self.settings.memory_backend == "file" and self.settings.file_auto_learn
-                )
+                ) or (self.settings.memory_backend == "file" and self.settings.file_auto_learn)
                 if should_auto_learn:
-                    asyncio.create_task(
+                    t = asyncio.create_task(
                         self._auto_learn(message.content, full_response, session_key)
                     )
+                    self._background_tasks.add(t)
+                    t.add_done_callback(self._background_tasks.discard)
 
         except TimeoutError:
             logger.error("Agent backend timed out")

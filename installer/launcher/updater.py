@@ -8,28 +8,26 @@ from __future__ import annotations
 import json
 import logging
 import platform
-import shutil
 import subprocess
 import urllib.request
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from installer.launcher.common import (
+    DEV_MODE_MARKER,
+    GIT_REPO_URL,
+    PACKAGE_NAME,
+    POCKETCLAW_HOME,
+    VENV_DIR,
+    StatusCallback,
+    find_uv,
+    get_installed_version,
+    noop_status,
+)
+
 logger = logging.getLogger(__name__)
 
-POCKETCLAW_HOME = Path.home() / ".pocketclaw"
-VENV_DIR = POCKETCLAW_HOME / "venv"
-UV_DIR = POCKETCLAW_HOME / "uv"
-PACKAGE_NAME = "pocketpaw"
 PYPI_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
-GIT_REPO_URL = "https://github.com/pocketpaw/pocketpaw.git"
-DEV_MODE_MARKER = POCKETCLAW_HOME / ".dev-mode"
-
-StatusCallback = Callable[[str], None]
-
-
-def _noop_status(msg: str) -> None:
-    pass
 
 
 @dataclass
@@ -48,7 +46,7 @@ class Updater:
     """Check for and apply PocketPaw updates."""
 
     def __init__(self, on_status: StatusCallback | None = None) -> None:
-        self.on_status = on_status or _noop_status
+        self.on_status = on_status or noop_status
 
     def is_dev_mode(self) -> bool:
         """Check if the launcher is running in dev/branch mode."""
@@ -159,16 +157,26 @@ class Updater:
         try:
             if uv:
                 cmd = [
-                    uv, "pip", "install", "--reinstall", pkg,
-                    "--python", str(python),
+                    uv,
+                    "pip",
+                    "install",
+                    "--reinstall",
+                    pkg,
+                    "--python",
+                    str(python),
                 ]
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=300,
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
                 )
             else:
                 result = subprocess.run(
                     [str(python), "-m", "pip", "install", "--force-reinstall", pkg, "--quiet"],
-                    capture_output=True, text=True, timeout=300,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
                 )
             if result.returncode == 0:
                 new_ver = self._get_installed_version()
@@ -191,43 +199,14 @@ class Updater:
 
     def _find_uv(self) -> str | None:
         """Find uv binary (downloaded by bootstrap or on system PATH)."""
-        if platform.system() == "Windows":
-            local_uv = UV_DIR / "uv.exe"
-        else:
-            local_uv = UV_DIR / "uv"
-        if local_uv.exists():
-            return str(local_uv)
-        return shutil.which("uv")
+        return find_uv()
 
     def _get_installed_version(self) -> str | None:
         """Get installed pocketpaw version from venv."""
         python = self._venv_python()
         if not python.exists():
             return None
-
-        uv = self._find_uv()
-        try:
-            if uv:
-                result = subprocess.run(
-                    [uv, "pip", "show", PACKAGE_NAME, "--python", str(python)],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-            else:
-                result = subprocess.run(
-                    [str(python), "-m", "pip", "show", PACKAGE_NAME],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-            if result.returncode == 0:
-                for line in result.stdout.splitlines():
-                    if line.startswith("Version:"):
-                        return line.split(":", 1)[1].strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
-        return None
+        return get_installed_version(python=python, uv=self._find_uv())
 
     def _get_pypi_version(self) -> str | None:
         """Fetch the latest version from PyPI JSON API."""
@@ -244,10 +223,24 @@ class Updater:
             return None
 
     def _version_newer(self, latest: str, current: str) -> bool:
-        """Compare version strings. Returns True if latest > current."""
+        """Compare version strings. Returns True if latest > current.
+
+        Handles pre-release suffixes (e.g. 0.2.0a1) via packaging.version,
+        falling back to tuple comparison for simple X.Y.Z versions.
+        """
         try:
-            latest_parts = [int(x) for x in latest.split(".")]
-            current_parts = [int(x) for x in current.split(".")]
-            return latest_parts > current_parts
+            from packaging.version import Version
+
+            return Version(latest) > Version(current)
+        except ImportError:
+            pass
+        # Fallback: strip non-numeric suffixes and compare tuples
+        import re
+
+        def _parse(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in re.findall(r"\d+", v))
+
+        try:
+            return _parse(latest) > _parse(current)
         except (ValueError, AttributeError):
             return latest != current
