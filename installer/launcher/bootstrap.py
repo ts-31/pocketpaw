@@ -1,5 +1,5 @@
 # PocketPaw Desktop Launcher — Bootstrap Module
-# Detects Python, creates venv, installs pocketpaw via pip.
+# Detects Python, creates venv, installs pocketpaw via uv (falls back to pip).
 # On Windows, downloads the Python embeddable package if Python is missing.
 # Created: 2026-02-10
 
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Where everything lives
 POCKETCLAW_HOME = Path.home() / ".pocketclaw"
 VENV_DIR = POCKETCLAW_HOME / "venv"
+UV_DIR = POCKETCLAW_HOME / "uv"
 EMBEDDED_PYTHON_DIR = POCKETCLAW_HOME / "python"
 PACKAGE_NAME = "pocketpaw"
 MIN_PYTHON = (3, 11)
@@ -30,6 +31,23 @@ MIN_PYTHON = (3, 11)
 # Format: python-{version}-embed-{arch}.zip
 PYTHON_EMBED_VERSION = "3.12.8"
 PYTHON_EMBED_URL = "https://www.python.org/ftp/python/{version}/python-{version}-embed-{arch}.zip"
+
+# Dependency overrides — loosen pins from transitive deps that lack
+# prebuilt wheels for newer Python versions.
+UV_OVERRIDES = [
+    "tiktoken>=0.7.0",
+]
+
+# uv standalone download URLs
+UV_VERSION = "0.6.6"
+UV_DOWNLOAD_URLS = {
+    ("Windows", "AMD64"): f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-pc-windows-msvc.zip",
+    ("Windows", "x86"): f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-i686-pc-windows-msvc.zip",
+    ("Darwin", "arm64"): f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-apple-darwin.tar.gz",
+    ("Darwin", "x86_64"): f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-apple-darwin.tar.gz",
+    ("Linux", "x86_64"): f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz",
+    ("Linux", "aarch64"): f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/uv-aarch64-unknown-linux-gnu.tar.gz",
+}
 
 
 @dataclass
@@ -76,7 +94,8 @@ class Bootstrap:
         if venv_python and venv_python.exists():
             status.venv_exists = True
             # Check if pocketpaw is installed in the venv
-            version = self._get_installed_version(str(venv_python))
+            uv = self._find_uv()
+            version = self._get_installed_version(str(venv_python), uv=uv)
             if version:
                 status.pocketpaw_installed = True
                 status.pocketpaw_version = version
@@ -85,7 +104,7 @@ class Bootstrap:
         return status
 
     def run(self, extras: list[str] | None = None) -> BootstrapStatus:
-        """Full bootstrap: find/install Python, create venv, install pocketpaw.
+        """Full bootstrap: find/install Python, get uv, create venv, install pocketpaw.
 
         Args:
             extras: pip extras to install (e.g. ["telegram", "discord"])
@@ -115,11 +134,17 @@ class Bootstrap:
             status.python_version = self._get_python_version(python)
             logger.info("Using Python %s at %s", status.python_version, python)
 
-            # Step 2: Create venv if needed
+            # Step 2: Get uv (fast Python package installer)
+            self.progress("Setting up uv package manager...", 20)
+            uv = self._ensure_uv()
+            if not uv:
+                logger.warning("Could not get uv, falling back to pip")
+
+            # Step 3: Create venv if needed
             venv_python = self._venv_python()
             if not venv_python or not venv_python.exists():
-                self.progress("Creating virtual environment...", 25)
-                self._create_venv(python)
+                self.progress("Creating virtual environment...", 30)
+                self._create_venv(python, uv)
                 venv_python = self._venv_python()
                 if not venv_python or not venv_python.exists():
                     status.error = f"Failed to create venv at {VENV_DIR}"
@@ -127,19 +152,15 @@ class Bootstrap:
 
             status.venv_exists = True
 
-            # Step 3: Install/upgrade pip in the venv
-            self.progress("Updating pip...", 35)
-            self._upgrade_pip(str(venv_python))
-
             # Step 4: Install pocketpaw
             self.progress("Installing PocketPaw...", 45)
-            success = self._install_pocketpaw(str(venv_python), extras)
-            if not success:
-                status.error = "Failed to install pocketpaw. Check your internet connection."
+            install_err = self._install_pocketpaw(str(venv_python), extras, uv)
+            if install_err:
+                status.error = install_err
                 return status
 
             self.progress("Verifying installation...", 90)
-            version = self._get_installed_version(str(venv_python))
+            version = self._get_installed_version(str(venv_python), uv)
             if version:
                 status.pocketpaw_installed = True
                 status.pocketpaw_version = version
@@ -250,7 +271,7 @@ class Bootstrap:
                 content = content.replace("#import site", "import site")
                 pth_file.write_text(content)
 
-            # Install pip via get-pip.py
+            # Install pip via get-pip.py (needed as fallback if uv fails)
             self.progress("Installing pip...", 22)
             get_pip_url = "https://bootstrap.pypa.io/get-pip.py"
             get_pip_path = EMBEDDED_PYTHON_DIR / "get-pip.py"
@@ -273,6 +294,94 @@ class Bootstrap:
 
         return None
 
+    # ── uv Package Manager ─────────────────────────────────────────────
+
+    def _uv_path(self) -> Path:
+        """Path where we store the uv binary."""
+        if platform.system() == "Windows":
+            return UV_DIR / "uv.exe"
+        return UV_DIR / "uv"
+
+    def _find_uv(self) -> str | None:
+        """Find uv on the system or in our download location."""
+        # Check our downloaded copy first
+        local_uv = self._uv_path()
+        if local_uv.exists():
+            return str(local_uv)
+
+        # Check system PATH
+        system_uv = shutil.which("uv")
+        if system_uv:
+            return system_uv
+
+        return None
+
+    def _ensure_uv(self) -> str | None:
+        """Find or download uv. Returns path to uv binary or None."""
+        existing = self._find_uv()
+        if existing:
+            logger.info("Using uv at %s", existing)
+            return existing
+
+        return self._download_uv()
+
+    def _download_uv(self) -> str | None:
+        """Download the uv standalone binary."""
+        system = platform.system()
+        machine = platform.machine()
+
+        # Normalise machine name
+        if machine in ("x86_64", "AMD64"):
+            machine_key = "AMD64" if system == "Windows" else "x86_64"
+        elif machine in ("arm64", "aarch64"):
+            machine_key = "arm64" if system == "Darwin" else "aarch64"
+        else:
+            machine_key = machine
+
+        url = UV_DOWNLOAD_URLS.get((system, machine_key))
+        if not url:
+            logger.warning("No uv download URL for %s/%s", system, machine)
+            return None
+
+        logger.info("Downloading uv from %s", url)
+        try:
+            UV_DIR.mkdir(parents=True, exist_ok=True)
+            response = urllib.request.urlopen(url, timeout=60)
+            data = response.read()
+
+            if url.endswith(".zip"):
+                with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                    # Extract uv.exe from inside the archive
+                    for member in zf.namelist():
+                        basename = Path(member).name
+                        if basename in ("uv.exe", "uv"):
+                            target = UV_DIR / basename
+                            with zf.open(member) as src, open(target, "wb") as dst:
+                                dst.write(src.read())
+                            break
+            else:
+                # .tar.gz
+                import tarfile
+                with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+                    for member in tf.getmembers():
+                        basename = Path(member.name).name
+                        if basename == "uv":
+                            target = UV_DIR / "uv"
+                            with tf.extractfile(member) as src:
+                                target.write_bytes(src.read())
+                            target.chmod(0o755)
+                            break
+
+            uv_bin = self._uv_path()
+            if uv_bin.exists():
+                logger.info("uv downloaded to %s", uv_bin)
+                return str(uv_bin)
+
+        except Exception as exc:
+            logger.warning("Failed to download uv: %s", exc)
+
+        return None
+
     # ── Virtual Environment ────────────────────────────────────────────
 
     def _venv_python(self) -> Path | None:
@@ -281,13 +390,24 @@ class Bootstrap:
             return VENV_DIR / "Scripts" / "python.exe"
         return VENV_DIR / "bin" / "python"
 
-    def _create_venv(self, python: str) -> None:
-        """Create a virtual environment using the given Python."""
+    def _create_venv(self, python: str, uv: str | None = None) -> None:
+        """Create a virtual environment."""
         logger.info("Creating venv at %s using %s", VENV_DIR, python)
         VENV_DIR.parent.mkdir(parents=True, exist_ok=True)
 
-        # Use subprocess to call the found Python's venv module
-        # (more reliable than venv.create when using a different Python)
+        if uv:
+            # uv venv is much faster
+            result = subprocess.run(
+                [uv, "venv", str(VENV_DIR), "--python", python, "--quiet"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode == 0:
+                return
+            logger.warning("uv venv failed (%s), falling back to stdlib", result.stderr.strip())
+
+        # Fallback: use subprocess to call the found Python's venv module
         result = subprocess.run(
             [python, "-m", "venv", str(VENV_DIR), "--clear"],
             capture_output=True,
@@ -295,63 +415,142 @@ class Bootstrap:
             timeout=60,
         )
         if result.returncode != 0:
-            # Fallback: try venv.create if we're using the same Python
+            # Last resort: try venv.create if we're using the same Python
             logger.warning("subprocess venv failed, trying venv.create: %s", result.stderr)
             venv.create(str(VENV_DIR), with_pip=True, clear=True)
 
-    def _upgrade_pip(self, venv_python: str) -> None:
-        """Upgrade pip in the venv."""
-        try:
-            subprocess.run(
-                [venv_python, "-m", "pip", "install", "--upgrade", "pip", "--quiet"],
-                capture_output=True,
-                timeout=120,
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            logger.warning("Failed to upgrade pip, continuing anyway")
-
     # ── Package Installation ───────────────────────────────────────────
 
-    def _install_pocketpaw(self, venv_python: str, extras: list[str]) -> bool:
-        """Install pocketpaw into the venv with given extras."""
+    def _install_pocketpaw(
+        self, venv_python: str, extras: list[str], uv: str | None = None,
+    ) -> str | None:
+        """Install pocketpaw into the venv with given extras.
+
+        Uses uv if available (10-100x faster), falls back to pip.
+
+        Returns:
+            None on success, or an error message string on failure.
+        """
         if extras:
             pkg = f"{PACKAGE_NAME}[{','.join(extras)}]"
         else:
             pkg = PACKAGE_NAME
 
-        logger.info("Installing %s", pkg)
+        logger.info("Installing %s (using %s)", pkg, "uv" if uv else "pip")
         self.progress(f"Installing {pkg}...", 50)
 
         try:
-            result = subprocess.run(
-                [venv_python, "-m", "pip", "install", pkg, "--quiet"],
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
-            if result.returncode != 0:
-                logger.error("pip install failed:\n%s", result.stderr[-2000:])
-                return False
-            return True
+            if uv:
+                return self._install_with_uv(uv, venv_python, pkg)
+            return self._install_with_pip(venv_python, pkg)
         except subprocess.TimeoutExpired:
-            logger.error("pip install timed out after 10 minutes")
-            return False
-        except FileNotFoundError:
-            logger.error("venv python not found: %s", venv_python)
-            return False
+            logger.error("Install timed out after 10 minutes")
+            return "Installation timed out after 10 minutes. Try again with a faster connection."
+        except FileNotFoundError as exc:
+            logger.error("Executable not found: %s", exc)
+            return f"Executable not found: {exc}"
 
-    def _get_installed_version(self, venv_python: str) -> str | None:
+    def _install_with_uv(self, uv: str, venv_python: str, pkg: str) -> str | None:
+        """Install a package using uv pip install with dependency overrides."""
+        # Write overrides file so uv can loosen transitive pins
+        # (e.g. open-interpreter pins tiktoken==0.7.0 which has no cp313 wheel)
+        overrides_file = POCKETCLAW_HOME / "uv-overrides.txt"
+        overrides_file.write_text("\n".join(UV_OVERRIDES) + "\n", encoding="utf-8")
+
+        cmd = [uv, "pip", "install", pkg, "--python", venv_python,
+               "--override", str(overrides_file)]
+        logger.info("Running: %s", " ".join(cmd))
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if result.returncode == 0:
+            return None  # success
+
+        stderr = result.stderr[-2000:] if result.stderr else ""
+        logger.error("uv pip install failed:\n%s", stderr)
+
+        # Retry without overrides in case the override itself caused the issue
+        logger.info("Retrying uv pip install without overrides")
+        self.progress("Retrying install...", 55)
+        result2 = subprocess.run(
+            [uv, "pip", "install", pkg, "--python", venv_python],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if result2.returncode == 0:
+            return None
+
+        stderr2 = result2.stderr[-2000:] if result2.stderr else ""
+        logger.error("uv pip install (no overrides) also failed:\n%s", stderr2)
+
+        # Fallback to pip
+        logger.info("Falling back to pip")
+        self.progress("Retrying install with pip...", 60)
+        return self._install_with_pip(venv_python, pkg)
+
+    def _install_with_pip(self, venv_python: str, pkg: str) -> str | None:
+        """Install a package using pip (fallback)."""
+        # Make sure pip is up to date first
+        subprocess.run(
+            [venv_python, "-m", "pip", "install", "--upgrade", "pip", "--quiet"],
+            capture_output=True,
+            timeout=120,
+        )
+
+        result = subprocess.run(
+            [venv_python, "-m", "pip", "install", pkg, "--quiet"],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if result.returncode == 0:
+            return None  # success
+
+        stderr = result.stderr[-2000:] if result.stderr else ""
+        logger.error("pip install failed:\n%s", stderr)
+        return self._format_pip_error(stderr)
+
+    @staticmethod
+    def _format_pip_error(stderr: str) -> str:
+        """Extract a short, actionable message from pip/uv stderr output."""
+        for marker in ("ERROR:", "error:", "×"):
+            for line in stderr.splitlines():
+                stripped = line.strip()
+                if stripped.startswith(marker):
+                    return f"Install failed: {stripped}"
+
+        return (
+            "Failed to install pocketpaw. "
+            "Check the log at ~/.pocketclaw/logs/launcher.log for details."
+        )
+
+    def _get_installed_version(
+        self, venv_python: str, uv: str | None = None,
+    ) -> str | None:
         """Get the installed pocketpaw version from the venv."""
         try:
-            result = subprocess.run(
-                [venv_python, "-m", "pip", "show", PACKAGE_NAME],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
+            if uv:
+                result = subprocess.run(
+                    [uv, "pip", "show", PACKAGE_NAME, "--python", venv_python],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            else:
+                result = subprocess.run(
+                    [venv_python, "-m", "pip", "show", PACKAGE_NAME],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
             if result.returncode == 0:
                 for line in result.stdout.splitlines():
-                    if line.startswith("Version:"):
+                    if line.lower().startswith("version:"):
                         return line.split(":", 1)[1].strip()
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass

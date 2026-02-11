@@ -76,7 +76,8 @@ class ServerManager:
             PID_FILE.write_text(str(self._process.pid))
 
             # Wait for the server to become healthy
-            if self._wait_for_healthy(timeout=30):
+            # pocketclaw needs ~25s for startup + internal setup
+            if self._wait_for_healthy(timeout=60):
                 self.on_status(f"PocketPaw running on port {self.port}")
                 return True
             else:
@@ -161,8 +162,28 @@ class ServerManager:
             venv_bin = str(VENV_DIR / "Scripts")
         else:
             venv_bin = str(VENV_DIR / "bin")
-        env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
+
+        # Also add the uv directory so pocketclaw's auto_install can find uv
+        uv_dir = str(POCKETCLAW_HOME / "uv")
+        env["PATH"] = venv_bin + os.pathsep + uv_dir + os.pathsep + env.get("PATH", "")
+
         env["VIRTUAL_ENV"] = str(VENV_DIR)
+        # Force UTF-8 so emoji/unicode in pocketclaw output doesn't crash
+        # on Windows (default cp1252 can't encode them)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+
+        # Set UV_OVERRIDE so any uv invocation (including pocketclaw's
+        # internal auto_install) uses our tiktoken override
+        overrides_file = POCKETCLAW_HOME / "uv-overrides.txt"
+        if not overrides_file.exists():
+            # Ensure the overrides file exists even if bootstrap was skipped
+            try:
+                overrides_file.write_text("tiktoken>=0.7.0\n", encoding="utf-8")
+            except OSError:
+                pass
+        env["UV_OVERRIDE"] = str(overrides_file)
+
         return env
 
     def _creation_flags(self) -> int:
@@ -177,8 +198,17 @@ class ServerManager:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._process and self._process.poll() is not None:
-                # Process died
-                logger.error("Server process exited with code %d", self._process.returncode)
+                # Process died — capture output for debugging
+                rc = self._process.returncode
+                stderr_out = ""
+                try:
+                    _, stderr_bytes = self._process.communicate(timeout=2)
+                    stderr_out = stderr_bytes.decode("utf-8", errors="replace")[-2000:]
+                except Exception:
+                    pass
+                logger.error(
+                    "Server process exited with code %d\n%s", rc, stderr_out,
+                )
                 return False
             if self.is_healthy():
                 return True

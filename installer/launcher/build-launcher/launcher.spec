@@ -12,7 +12,9 @@ import platform
 from pathlib import Path
 
 # Paths
-LAUNCHER_DIR = Path("installer/launcher")
+# SPECPATH is provided by PyInstaller and points to the directory containing this spec file
+ROOT_DIR = Path(SPECPATH).parent.parent.parent  # Go up to repo root
+LAUNCHER_DIR = ROOT_DIR / "installer" / "launcher"
 ASSETS_DIR = LAUNCHER_DIR / "assets"
 
 # Collect data files (icon, etc.)
@@ -33,7 +35,7 @@ else:
 
 a = Analysis(
     [str(LAUNCHER_DIR / "__main__.py")],
-    pathex=["."],
+    pathex=[str(LAUNCHER_DIR.parent), "."],
     datas=datas,
     hiddenimports=[
         "pystray",
@@ -42,7 +44,10 @@ a = Analysis(
         "PIL.Image",
         "tkinter",
         "tkinter.ttk",
-        # Launcher modules
+        # Launcher modules — both package paths so PyInstaller collects them
+        "launcher",
+        "launcher.__init__",
+        "launcher.__main__",
         "launcher.bootstrap",
         "launcher.server",
         "launcher.tray",

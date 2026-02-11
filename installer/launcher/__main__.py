@@ -7,12 +7,42 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
+import os
 import sys
 import threading
 import time
 import webbrowser
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# PyInstaller frozen-exe fixup: when PyInstaller runs __main__.py as a script,
+# __package__ is None, so relative imports (from .bootstrap …) fail.  We fix
+# this by registering the launcher directory as the "launcher" package and
+# setting __package__ so Python resolves the dot-imports correctly.
+# ---------------------------------------------------------------------------
+if __package__ is None or __package__ == "":
+    # Determine the directory that contains this __main__.py
+    _this_dir = Path(__file__).resolve().parent
+
+    # Make sure the *parent* of that directory is on sys.path so that
+    # "import launcher" finds the right folder.
+    _parent_dir = str(_this_dir.parent)
+    if _parent_dir not in sys.path:
+        sys.path.insert(0, _parent_dir)
+
+    # Register the package so relative imports work
+    __package__ = "launcher"
+    try:
+        importlib.import_module("launcher")
+    except ImportError:
+        # If there's no __init__.py reachable, create a virtual package
+        import types
+        pkg = types.ModuleType("launcher")
+        pkg.__path__ = [str(_this_dir)]
+        pkg.__package__ = "launcher"
+        sys.modules["launcher"] = pkg
 
 # Set up logging before imports
 LOG_DIR = Path.home() / ".pocketclaw" / "logs"

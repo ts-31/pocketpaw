@@ -1,5 +1,6 @@
 # PocketPaw Desktop Launcher — Update Checker
 # Checks PyPI for newer versions and upgrades the venv install.
+# Uses uv when available for faster installs, falls back to pip.
 # Created: 2026-02-10
 
 from __future__ import annotations
@@ -7,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import platform
+import shutil
 import subprocess
 import urllib.request
 from collections.abc import Callable
@@ -17,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 POCKETCLAW_HOME = Path.home() / ".pocketclaw"
 VENV_DIR = POCKETCLAW_HOME / "venv"
+UV_DIR = POCKETCLAW_HOME / "uv"
 PACKAGE_NAME = "pocketpaw"
 PYPI_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
 
@@ -72,23 +75,32 @@ class Updater:
             return False
 
         self.on_status("Updating PocketPaw...")
-        logger.info("Running pip install --upgrade %s", PACKAGE_NAME)
 
+        uv = self._find_uv()
         try:
-            result = subprocess.run(
-                [
-                    str(python),
-                    "-m",
-                    "pip",
-                    "install",
-                    "--upgrade",
-                    PACKAGE_NAME,
-                    "--quiet",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
+            if uv:
+                logger.info("Running uv pip install --upgrade %s", PACKAGE_NAME)
+                # Use overrides file if it exists (created by bootstrap)
+                overrides = POCKETCLAW_HOME / "uv-overrides.txt"
+                cmd = [uv, "pip", "install", "--upgrade", PACKAGE_NAME,
+                       "--python", str(python)]
+                if overrides.exists():
+                    cmd.extend(["--override", str(overrides)])
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+            else:
+                logger.info("Running pip install --upgrade %s", PACKAGE_NAME)
+                result = subprocess.run(
+                    [str(python), "-m", "pip", "install", "--upgrade",
+                     PACKAGE_NAME, "--quiet"],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
             if result.returncode == 0:
                 new_ver = self._get_installed_version()
                 self.on_status(f"Updated to v{new_ver}")
@@ -108,18 +120,38 @@ class Updater:
             return VENV_DIR / "Scripts" / "python.exe"
         return VENV_DIR / "bin" / "python"
 
+    def _find_uv(self) -> str | None:
+        """Find uv binary (downloaded by bootstrap or on system PATH)."""
+        if platform.system() == "Windows":
+            local_uv = UV_DIR / "uv.exe"
+        else:
+            local_uv = UV_DIR / "uv"
+        if local_uv.exists():
+            return str(local_uv)
+        return shutil.which("uv")
+
     def _get_installed_version(self) -> str | None:
         """Get installed pocketpaw version from venv."""
         python = self._venv_python()
         if not python.exists():
             return None
+
+        uv = self._find_uv()
         try:
-            result = subprocess.run(
-                [str(python), "-m", "pip", "show", PACKAGE_NAME],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
+            if uv:
+                result = subprocess.run(
+                    [uv, "pip", "show", PACKAGE_NAME, "--python", str(python)],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            else:
+                result = subprocess.run(
+                    [str(python), "-m", "pip", "show", PACKAGE_NAME],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
             if result.returncode == 0:
                 for line in result.stdout.splitlines():
                     if line.startswith("Version:"):
