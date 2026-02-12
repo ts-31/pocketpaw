@@ -109,6 +109,13 @@ class AssignTaskRequest(BaseModel):
     agent_ids: list[str]
 
 
+class UpdateTaskStatusRequest(BaseModel):
+    """Request to update a task's status."""
+
+    status: str
+    agent_id: str | None = None
+
+
 class PostMessageRequest(BaseModel):
     """Request to post a message on a task."""
 
@@ -363,12 +370,19 @@ async def assign_task(task_id: str, request: AssignTaskRequest) -> dict[str, Any
 
 
 @router.post("/tasks/{task_id}/status")
-async def update_task_status(
-    task_id: str, status: str, agent_id: str | None = None
-) -> dict[str, Any]:
-    """Update a task's status."""
+async def update_task_status(task_id: str, request: UpdateTaskStatusRequest) -> dict[str, Any]:
+    """Update a task's status.
+
+    Accepts JSON body: {"status": "done", "agent_id": "optional-agent-id"}
+    """
     manager = get_mission_control_manager()
-    success = await manager.update_task_status(task_id, TaskStatus(status), agent_id)
+
+    try:
+        task_status = TaskStatus(request.status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
+
+    success = await manager.update_task_status(task_id, task_status, request.agent_id)
 
     if not success:
         raise HTTPException(status_code=404, detail="Task not found")
