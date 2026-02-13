@@ -8,6 +8,13 @@ Thanks for your interest in contributing to PocketPaw! This guide will help you 
 >
 > PRs opened against `main` will be closed. The `main` branch is updated only via merge from `dev` when a release is ready.
 
+## Before You Start
+
+- **Search [existing issues](https://github.com/pocketpaw/pocketpaw/issues)** to see if your bug or feature has already been reported.
+- **Check [open pull requests](https://github.com/pocketpaw/pocketpaw/pulls)** to make sure someone isn't already working on the same thing.
+- If an issue exists, comment on it to let others know you're picking it up.
+- If no issue exists, consider opening one first to discuss the approach before writing code.
+
 ## Getting Started
 
 1. **Fork** the repository and clone your fork.
