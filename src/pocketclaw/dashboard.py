@@ -2163,6 +2163,10 @@ async def websocket_endpoint(
                 async with _settings_lock:
                     settings.agent_backend = data.get("agent_backend", settings.agent_backend)
                     settings.llm_provider = data.get("llm_provider", settings.llm_provider)
+                    if data.get("ollama_host"):
+                        settings.ollama_host = data["ollama_host"]
+                    if data.get("ollama_model"):
+                        settings.ollama_model = data["ollama_model"]
                     if data.get("anthropic_model"):
                         settings.anthropic_model = data.get("anthropic_model")
                     if "bypass_permissions" in data:
@@ -2337,6 +2341,8 @@ async def websocket_endpoint(
                         "content": {
                             "agentBackend": settings.agent_backend,
                             "llmProvider": settings.llm_provider,
+                            "ollamaHost": settings.ollama_host,
+                            "ollamaModel": settings.ollama_model,
                             "anthropicModel": settings.anthropic_model,
                             "bypassPermissions": settings.bypass_permissions,
                             "hasAnthropicKey": bool(settings.anthropic_api_key),
