@@ -1,4 +1,4 @@
-"""MCP server configuration — load/save from ~/.pocketclaw/mcp_servers.json.
+"""MCP server configuration — load/save from ~/.pocketpaw/mcp_servers.json.
 
 Created: 2026-02-07
 """

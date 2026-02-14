@@ -105,7 +105,7 @@ PYTHONPATH=. python -m installer.launcher --dev --reset --no-tray
 
 ### How dev mode works
 
-- A marker file `~/.pocketclaw/.dev-mode` is created when using `--dev`, `--branch`, or `--local`
+- A marker file `~/.pocketpaw/.dev-mode` is created when using `--dev`, `--branch`, or `--local`
 - While this marker exists, the **updater** skips PyPI version checks and instead offers to re-pull from the configured branch
 - To switch back to PyPI releases, use `--reset` without `--dev`:
   ```bash
@@ -164,13 +164,13 @@ Triggered on:
 
 1. Searches for Python 3.11+ in common locations (`python3`, `python3.12`, `python3.11`, etc.)
 2. On Windows, if no Python found, downloads the [Python embeddable package](https://www.python.org/downloads/) (~15MB, no admin needed)
-3. Creates a venv at `~/.pocketclaw/venv/`
+3. Creates a venv at `~/.pocketpaw/venv/`
 4. Runs `pip install pocketpaw[recommended]` inside the venv
 
 ### Server management (`server.py`)
 
 - Starts PocketPaw as a subprocess: `{venv}/bin/python -m pocketclaw --port {port}`
-- Writes PID to `~/.pocketclaw/launcher.pid`
+- Writes PID to `~/.pocketpaw/launcher.pid`
 - Health check via HTTP GET to `http://127.0.0.1:{port}/`
 - Graceful shutdown: SIGTERM → wait → SIGKILL
 - Auto-finds a free port if the default (8888) is occupied
@@ -191,12 +191,12 @@ Triggered on:
 
 | Path | Purpose |
 |------|---------|
-| `~/.pocketclaw/venv/` | Virtual environment with pocketpaw installed |
-| `~/.pocketclaw/config.json` | PocketPaw configuration |
-| `~/.pocketclaw/launcher.pid` | Server process PID |
-| `~/.pocketclaw/logs/launcher.log` | Launcher log file |
-| `~/.pocketclaw/.dev-mode` | Dev mode marker (present when `--dev`/`--branch`/`--local` was used) |
-| `~/.pocketclaw/python/` | Embedded Python (Windows only) |
+| `~/.pocketpaw/venv/` | Virtual environment with pocketpaw installed |
+| `~/.pocketpaw/config.json` | PocketPaw configuration |
+| `~/.pocketpaw/launcher.pid` | Server process PID |
+| `~/.pocketpaw/logs/launcher.log` | Launcher log file |
+| `~/.pocketpaw/.dev-mode` | Dev mode marker (present when `--dev`/`--branch`/`--local` was used) |
+| `~/.pocketpaw/python/` | Embedded Python (Windows only) |
 
 ## Tests
 

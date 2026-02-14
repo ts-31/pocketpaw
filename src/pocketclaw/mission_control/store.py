@@ -6,7 +6,7 @@ Updated: 2026-02-12 — Added Project entity for Deep Work orchestration layer.
 Implements MissionControlStoreProtocol using JSON files.
 
 Storage layout:
-~/.pocketclaw/mission_control/
+~/.pocketpaw/mission_control/
     agents.json         # All agent profiles
     tasks.json          # All tasks
     messages.json       # All messages (indexed by task_id)
@@ -58,7 +58,7 @@ class FileMissionControlStore:
         """Initialize the store.
 
         Args:
-            base_path: Directory for storage files. Defaults to ~/.pocketclaw/mission_control/
+            base_path: Directory for storage files. Defaults to ~/.pocketpaw/mission_control/
         """
         if base_path is None:
             base_path = Path.home() / ".pocketclaw" / "mission_control"

@@ -76,7 +76,7 @@ async def run_multi_channel_mode(settings: Settings, args: argparse.Namespace) -
 
     if args.discord:
         if not settings.discord_bot_token:
-            logger.error("Discord bot token not configured. Set POCKETCLAW_DISCORD_BOT_TOKEN.")
+            logger.error("Discord bot token not configured. Set POCKETPAW_DISCORD_BOT_TOKEN.")
         else:
             from pocketclaw.bus.adapters.discord_adapter import DiscordAdapter
 
@@ -91,8 +91,8 @@ async def run_multi_channel_mode(settings: Settings, args: argparse.Namespace) -
     if args.slack:
         if not settings.slack_bot_token or not settings.slack_app_token:
             logger.error(
-                "Slack tokens not configured. Set POCKETCLAW_SLACK_BOT_TOKEN "
-                "and POCKETCLAW_SLACK_APP_TOKEN."
+                "Slack tokens not configured. Set POCKETPAW_SLACK_BOT_TOKEN "
+                "and POCKETPAW_SLACK_APP_TOKEN."
             )
         else:
             from pocketclaw.bus.adapters.slack_adapter import SlackAdapter
@@ -108,8 +108,8 @@ async def run_multi_channel_mode(settings: Settings, args: argparse.Namespace) -
     if args.whatsapp:
         if not settings.whatsapp_access_token or not settings.whatsapp_phone_number_id:
             logger.error(
-                "WhatsApp not configured. Set POCKETCLAW_WHATSAPP_ACCESS_TOKEN "
-                "and POCKETCLAW_WHATSAPP_PHONE_NUMBER_ID."
+                "WhatsApp not configured. Set POCKETPAW_WHATSAPP_ACCESS_TOKEN "
+                "and POCKETPAW_WHATSAPP_PHONE_NUMBER_ID."
             )
         else:
             from pocketclaw.bus.adapters.whatsapp_adapter import WhatsAppAdapter
@@ -125,7 +125,7 @@ async def run_multi_channel_mode(settings: Settings, args: argparse.Namespace) -
 
     if getattr(args, "signal", False):
         if not settings.signal_phone_number:
-            logger.error("Signal not configured. Set POCKETCLAW_SIGNAL_PHONE_NUMBER.")
+            logger.error("Signal not configured. Set POCKETPAW_SIGNAL_PHONE_NUMBER.")
         else:
             from pocketclaw.bus.adapters.signal_adapter import SignalAdapter
 
@@ -140,8 +140,8 @@ async def run_multi_channel_mode(settings: Settings, args: argparse.Namespace) -
     if getattr(args, "matrix", False):
         if not settings.matrix_homeserver or not settings.matrix_user_id:
             logger.error(
-                "Matrix not configured. Set POCKETCLAW_MATRIX_HOMESERVER "
-                "and POCKETCLAW_MATRIX_USER_ID."
+                "Matrix not configured. Set POCKETPAW_MATRIX_HOMESERVER "
+                "and POCKETPAW_MATRIX_USER_ID."
             )
         else:
             from pocketclaw.bus.adapters.matrix_adapter import MatrixAdapter
@@ -160,8 +160,8 @@ async def run_multi_channel_mode(settings: Settings, args: argparse.Namespace) -
     if getattr(args, "teams", False):
         if not settings.teams_app_id or not settings.teams_app_password:
             logger.error(
-                "Teams not configured. Set POCKETCLAW_TEAMS_APP_ID "
-                "and POCKETCLAW_TEAMS_APP_PASSWORD."
+                "Teams not configured. Set POCKETPAW_TEAMS_APP_ID "
+                "and POCKETPAW_TEAMS_APP_PASSWORD."
             )
         else:
             from pocketclaw.bus.adapters.teams_adapter import TeamsAdapter
@@ -177,7 +177,7 @@ async def run_multi_channel_mode(settings: Settings, args: argparse.Namespace) -
 
     if getattr(args, "gchat", False):
         if not settings.gchat_service_account_key:
-            logger.error("Google Chat not configured. Set POCKETCLAW_GCHAT_SERVICE_ACCOUNT_KEY.")
+            logger.error("Google Chat not configured. Set POCKETPAW_GCHAT_SERVICE_ACCOUNT_KEY.")
         else:
             from pocketclaw.bus.adapters.gchat_adapter import GoogleChatAdapter
 
@@ -353,7 +353,7 @@ async def check_ollama(settings: Settings) -> int:
         console.print("  [green]Ollama is ready to use with PocketPaw![/]")
         console.print(
             "  Set [bold]llm_provider=ollama[/] in settings"
-            " or [bold]POCKETCLAW_LLM_PROVIDER=ollama[/]\n"
+            " or [bold]POCKETPAW_LLM_PROVIDER=ollama[/]\n"
         )
     return 1 if failures > 1 else 0
 

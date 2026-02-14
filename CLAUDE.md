@@ -87,12 +87,12 @@ The processing pipeline lives in `agents/loop.py` and `agents/router.py`:
 
 ### Key Subsystems
 
-- **Memory** (`memory/`) — Session history + long-term facts, file-based storage in `~/.pocketclaw/memory/`. Protocol-based (`MemoryStoreProtocol`) for future backend swaps
+- **Memory** (`memory/`) — Session history + long-term facts, file-based storage in `~/.pocketpaw/memory/`. Protocol-based (`MemoryStoreProtocol`) for future backend swaps
 - **Browser** (`browser/`) — Playwright-based automation using accessibility tree snapshots (not screenshots). `BrowserDriver` returns `NavigationResult` with a `refmap` mapping ref numbers to CSS selectors
-- **Security** (`security/`) — Guardian AI (secondary LLM safety check) + append-only audit log (`~/.pocketclaw/audit.jsonl`)
+- **Security** (`security/`) — Guardian AI (secondary LLM safety check) + append-only audit log (`~/.pocketpaw/audit.jsonl`)
 - **Tools** (`tools/`) — `ToolProtocol` with `ToolDefinition` supporting both Anthropic and OpenAI schema export. Built-in tools in `tools/builtin/`
 - **Bootstrap** (`bootstrap/`) — `AgentContextBuilder` assembles the system prompt from identity, memory, and current state
-- **Config** (`config.py`) — Pydantic Settings with `POCKETCLAW_` env prefix, JSON config at `~/.pocketclaw/config.json`. Channel-specific config: `discord_bot_token`, `discord_allowed_guild_ids`, `discord_allowed_user_ids`, `slack_bot_token`, `slack_app_token`, `slack_allowed_channel_ids`, `whatsapp_access_token`, `whatsapp_phone_number_id`, `whatsapp_verify_token`, `whatsapp_allowed_phone_numbers`
+- **Config** (`config.py`) — Pydantic Settings with `POCKETPAW_` env prefix, JSON config at `~/.pocketpaw/config.json`. Channel-specific config: `discord_bot_token`, `discord_allowed_guild_ids`, `discord_allowed_user_ids`, `slack_bot_token`, `slack_app_token`, `slack_allowed_channel_ids`, `whatsapp_access_token`, `whatsapp_phone_number_id`, `whatsapp_verify_token`, `whatsapp_allowed_phone_numbers`
 
 ### Frontend
 
@@ -102,7 +102,7 @@ The web dashboard (`frontend/`) is vanilla JS/CSS/HTML served via FastAPI+Jinja2
 
 - **Async everywhere**: All agent, bus, memory, and tool interfaces are async. Tests use `pytest-asyncio` with `asyncio_mode = "auto"`
 - **Protocol-oriented**: Core interfaces (`AgentProtocol`, `ToolProtocol`, `MemoryStoreProtocol`, `BaseChannelAdapter`) are Python `Protocol` classes for swappable implementations
-- **Env vars**: All settings use `POCKETCLAW_` prefix (e.g., `POCKETCLAW_ANTHROPIC_API_KEY`)
+- **Env vars**: All settings use `POCKETPAW_` prefix (e.g., `POCKETPAW_ANTHROPIC_API_KEY`)
 - **Ruff config**: line-length 100, target Python 3.11, lint rules E/F/I/UP
 - **Entry point**: `pocketclaw.__main__:main`
 - **Lazy imports**: Agent backends are imported inside `AgentRouter._initialize_agent()` to avoid loading unused dependencies

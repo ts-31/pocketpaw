@@ -4,10 +4,10 @@
 # Updated: 2026-02-10 - Session index for fast listing, delete/rename support
 #
 # Stores memories as markdown files for human readability:
-# - ~/.pocketclaw/memory/MEMORY.md     (long-term)
-# - ~/.pocketclaw/memory/2026-02-02.md (daily)
-# - ~/.pocketclaw/memory/sessions/     (session JSON files)
-# - ~/.pocketclaw/memory/sessions/_index.json (session metadata index)
+# - ~/.pocketpaw/memory/MEMORY.md     (long-term)
+# - ~/.pocketpaw/memory/2026-02-02.md (daily)
+# - ~/.pocketpaw/memory/sessions/     (session JSON files)
+# - ~/.pocketpaw/memory/sessions/_index.json (session metadata index)
 
 import asyncio
 import json

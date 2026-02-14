@@ -217,7 +217,7 @@ Switch anytime in settings or config.
 
 ### File-based Memory (Default)
 
-Stores memories as readable markdown in `~/.pocketclaw/memory/`:
+Stores memories as readable markdown in `~/.pocketpaw/memory/`:
 
 - `MEMORY.md`: Long-term facts about you
 - `sessions/`: Conversation history with smart compaction
@@ -231,7 +231,7 @@ Long conversations are automatically compacted to stay within budget:
 
 ### USER.md Profile
 
-PocketPaw creates identity files at `~/.pocketclaw/identity/` including `USER.md`, a profile loaded into every conversation so the agent knows your preferences.
+PocketPaw creates identity files at `~/.pocketpaw/identity/` including `USER.md`, a profile loaded into every conversation so the agent knows your preferences.
 
 ### Optional: Mem0 (Semantic Memory)
 
@@ -247,7 +247,7 @@ See [Memory documentation](documentation/features/memory.md) for details.
 
 ## Configuration
 
-Config lives in `~/.pocketclaw/config.json`. API keys and tokens are automatically encrypted in `secrets.enc`, never stored as plain text.
+Config lives in `~/.pocketpaw/config.json`. API keys and tokens are automatically encrypted in `secrets.enc`, never stored as plain text.
 
 ```json
 {
@@ -265,23 +265,23 @@ Config lives in `~/.pocketclaw/config.json`. API keys and tokens are automatical
 }
 ```
 
-Or use environment variables (all prefixed with `POCKETCLAW_`):
+Or use environment variables (all prefixed with `POCKETPAW_`):
 
 ```bash
 # Core
-export POCKETCLAW_ANTHROPIC_API_KEY="sk-ant-..."
-export POCKETCLAW_AGENT_BACKEND="claude_agent_sdk"
+export POCKETPAW_ANTHROPIC_API_KEY="sk-ant-..."
+export POCKETPAW_AGENT_BACKEND="claude_agent_sdk"
 
 # Channels
-export POCKETCLAW_DISCORD_BOT_TOKEN="..."
-export POCKETCLAW_SLACK_BOT_TOKEN="xoxb-..."
-export POCKETCLAW_SLACK_APP_TOKEN="xapp-..."
+export POCKETPAW_DISCORD_BOT_TOKEN="..."
+export POCKETPAW_SLACK_BOT_TOKEN="xoxb-..."
+export POCKETPAW_SLACK_APP_TOKEN="xapp-..."
 
 # Integrations
-export POCKETCLAW_GOOGLE_OAUTH_CLIENT_ID="..."
-export POCKETCLAW_GOOGLE_OAUTH_CLIENT_SECRET="..."
-export POCKETCLAW_TAVILY_API_KEY="..."
-export POCKETCLAW_GOOGLE_API_KEY="..."
+export POCKETPAW_GOOGLE_OAUTH_CLIENT_ID="..."
+export POCKETPAW_GOOGLE_OAUTH_CLIENT_SECRET="..."
+export POCKETPAW_TAVILY_API_KEY="..."
+export POCKETPAW_GOOGLE_API_KEY="..."
 ```
 
 See the [full configuration reference](documentation/features/) for all available settings.
@@ -299,8 +299,8 @@ See the [full configuration reference](documentation/features/) for all availabl
 - **Tool Policy.** Restrict agent tool access with profiles (`minimal`, `coding`, `full`) and allow/deny lists.
 - **Plan Mode.** Require human approval before executing shell commands or file edits.
 - **Security Audit CLI.** Run `pocketpaw --security-audit` to check 7 aspects (config permissions, API key exposure, audit log, etc.).
-- **Self-Audit Daemon.** Daily automated health checks (12 checks) with JSON reports at `~/.pocketclaw/audit_reports/`.
-- **Audit Logging.** Append-only log at `~/.pocketclaw/audit.jsonl`.
+- **Self-Audit Daemon.** Daily automated health checks (12 checks) with JSON reports at `~/.pocketpaw/audit_reports/`.
+- **Audit Logging.** Append-only log at `~/.pocketpaw/audit.jsonl`.
 - **Single User Lock.** Only authorized users can control the agent.
 - **File Jail.** Operations restricted to allowed directories.
 - **Local LLM Option.** Use Ollama and nothing phones home.

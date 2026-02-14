@@ -874,7 +874,7 @@ class PackageInstaller:
 
 
 class ConfigWriter:
-    """Write ~/.pocketclaw/config.json, merging with existing."""
+    """Write ~/.pocketpaw/config.json, merging with existing."""
 
     def write(self, config: dict) -> None:
         """Write config, preserving existing keys not in the new config."""

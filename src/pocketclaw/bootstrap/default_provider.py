@@ -12,9 +12,9 @@ from pocketclaw.config import get_config_dir
 class DefaultBootstrapProvider(BootstrapProviderProtocol):
     """
     Loads identity from:
-    - ~/.pocketclaw/identity/IDENTITY.md
-    - ~/.pocketclaw/identity/SOUL.md
-    - ~/.pocketclaw/identity/STYLE.md
+    - ~/.pocketpaw/identity/IDENTITY.md
+    - ~/.pocketpaw/identity/SOUL.md
+    - ~/.pocketpaw/identity/STYLE.md
     """
 
     def __init__(self, base_path: Path | None = None):

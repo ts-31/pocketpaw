@@ -356,7 +356,7 @@ class Settings(BaseSettings):
 
     # Media Downloads
     media_download_dir: str = Field(
-        default="", description="Custom media download dir (default: ~/.pocketclaw/media/)"
+        default="", description="Custom media download dir (default: ~/.pocketpaw/media/)"
     )
     media_max_file_size_mb: int = Field(
         default=50, description="Max media file size in MB (0 = unlimited)"

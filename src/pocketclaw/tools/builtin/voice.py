@@ -33,7 +33,7 @@ class TextToSpeechTool(BaseTool):
     def description(self) -> str:
         return (
             "Convert text to speech audio (MP3). Supports OpenAI TTS (tts-1 model) "
-            "and ElevenLabs. Output saved to ~/.pocketclaw/generated/audio/."
+            "and ElevenLabs. Output saved to ~/.pocketpaw/generated/audio/."
         )
 
     @property
@@ -77,7 +77,7 @@ class TextToSpeechTool(BaseTool):
         settings = get_settings()
         api_key = settings.openai_api_key
         if not api_key:
-            return self._error("OpenAI API key not configured. Set POCKETCLAW_OPENAI_API_KEY.")
+            return self._error("OpenAI API key not configured. Set POCKETPAW_OPENAI_API_KEY.")
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -114,7 +114,7 @@ class TextToSpeechTool(BaseTool):
         api_key = settings.elevenlabs_api_key
         if not api_key:
             return self._error(
-                "ElevenLabs API key not configured. Set POCKETCLAW_ELEVENLABS_API_KEY."
+                "ElevenLabs API key not configured. Set POCKETPAW_ELEVENLABS_API_KEY."
             )
 
         try:

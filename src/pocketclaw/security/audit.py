@@ -66,7 +66,7 @@ class AuditEvent:
 class AuditLogger:
     """
     Append-only audit logger.
-    Writes to ~/.pocketclaw/audit.log in JSONL format.
+    Writes to ~/.pocketpaw/audit.log in JSONL format.
     """
 
     def __init__(self, log_path: Path | None = None):
@@ -76,7 +76,7 @@ class AuditLogger:
             settings = get_settings()
             # Default to adjacent to config file, or explicit audit path
             # Since settings might not have audit_path, we derive it.
-            # Assuming settings.config_path is ~/.pocketclaw/config.json
+            # Assuming settings.config_path is ~/.pocketpaw/config.json
             base_dir = Path.home() / ".pocketclaw"
             base_dir.mkdir(parents=True, exist_ok=True)
             self.log_path = base_dir / "audit.jsonl"

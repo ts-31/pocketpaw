@@ -76,7 +76,7 @@ class WebSearchTool(BaseTool):
         if not api_key:
             return self._error(
                 "Tavily API key not configured. "
-                "Set POCKETCLAW_TAVILY_API_KEY or switch to 'brave' provider."
+                "Set POCKETPAW_TAVILY_API_KEY or switch to 'brave' provider."
             )
 
         try:
@@ -108,7 +108,7 @@ class WebSearchTool(BaseTool):
         if not api_key:
             return self._error(
                 "Brave Search API key not configured. "
-                "Set POCKETCLAW_BRAVE_SEARCH_API_KEY or switch to 'tavily' provider."
+                "Set POCKETPAW_BRAVE_SEARCH_API_KEY or switch to 'tavily' provider."
             )
 
         try:
@@ -148,7 +148,7 @@ class WebSearchTool(BaseTool):
         if not api_key:
             return self._error(
                 "Parallel AI API key not configured. "
-                "Set POCKETCLAW_PARALLEL_API_KEY or switch to 'tavily'/'brave' provider."
+                "Set POCKETPAW_PARALLEL_API_KEY or switch to 'tavily'/'brave' provider."
             )
 
         try:

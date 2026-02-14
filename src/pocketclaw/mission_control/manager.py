@@ -2,7 +2,7 @@
 
 Created: 2026-02-05
 Updated: 2026-02-12 — Added project directory management:
-  - create_project() now creates ~/.pocketclaw/projects/{id}/ on disk
+  - create_project() now creates ~/pocketpaw-projects/{id}/ on disk
   - delete_project() now removes the project directory via shutil.rmtree()
   - Added ensure_project_directories() for startup migration
   Previous: Added skipped count to get_project_progress(), project CRUD.

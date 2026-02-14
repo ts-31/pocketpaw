@@ -34,7 +34,7 @@ class SpeechToTextTool(BaseTool):
         return (
             "Transcribe an audio file to text using OpenAI Whisper. "
             "Supports mp3, mp4, mpeg, mpga, m4a, wav, webm formats. "
-            "Transcript is also saved to ~/.pocketclaw/generated/transcripts/."
+            "Transcript is also saved to ~/.pocketpaw/generated/transcripts/."
         )
 
     @property
@@ -65,7 +65,7 @@ class SpeechToTextTool(BaseTool):
         settings = get_settings()
         api_key = settings.openai_api_key
         if not api_key:
-            return self._error("OpenAI API key not configured. Set POCKETCLAW_OPENAI_API_KEY.")
+            return self._error("OpenAI API key not configured. Set POCKETPAW_OPENAI_API_KEY.")
 
         audio_path = Path(audio_file).expanduser()
         if not audio_path.exists():

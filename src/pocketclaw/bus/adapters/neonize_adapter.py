@@ -54,7 +54,7 @@ class NeonizeAdapter(BaseChannelAdapter):
     def __init__(self, db_path: str | None = None):
         super().__init__()
         self._client: Any = None
-        self._db_path = db_path or str(Path.home() / ".pocketclaw" / "neonize.sqlite3")
+        self._db_path = db_path or str(Path.home() / ".pocketpaw" / "neonize.sqlite3")
         self._qr_data: str | None = None  # latest QR string for REST endpoint
         self._connected = False
         self._client_task: asyncio.Task | None = None

@@ -63,7 +63,7 @@ def _check_config_conflicts() -> tuple[bool, str]:
 
 
 def _check_disk_usage() -> tuple[bool, str]:
-    """Check ~/.pocketclaw/ directory size."""
+    """Check ~/.pocketpaw/ directory size."""
     config_dir = get_config_dir()
     try:
         total = sum(f.stat().st_size for f in config_dir.rglob("*") if f.is_file())

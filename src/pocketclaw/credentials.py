@@ -3,9 +3,9 @@
 Changes:
   - 2026-02-06: Initial implementation — Fernet encryption with machine-derived PBKDF2 key.
 
-Stores API keys and tokens in ~/.pocketclaw/secrets.enc instead of plaintext config.json.
+Stores API keys and tokens in ~/.pocketpaw/secrets.enc instead of plaintext config.json.
 Encryption key derived from machine identity (hostname + MAC + username) so the encrypted
-file only works on the same machine/user. Salt stored in ~/.pocketclaw/.salt.
+file only works on the same machine/user. Salt stored in ~/.pocketpaw/.salt.
 """
 
 import base64
@@ -72,8 +72,8 @@ class CredentialStore:
     """Encrypted credential store backed by Fernet + PBKDF2.
 
     Storage:
-      - ~/.pocketclaw/secrets.enc  (Fernet-encrypted JSON)
-      - ~/.pocketclaw/.salt        (16-byte random salt, auto-generated)
+      - ~/.pocketpaw/secrets.enc  (Fernet-encrypted JSON)
+      - ~/.pocketpaw/.salt        (16-byte random salt, auto-generated)
 
     The encryption key is derived from:
       platform.node() + uuid.getnode() + os.getlogin()

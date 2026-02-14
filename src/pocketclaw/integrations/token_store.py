@@ -1,4 +1,4 @@
-# Token Store — file-based OAuth token persistence at ~/.pocketclaw/oauth/.
+# Token Store — file-based OAuth token persistence at ~/.pocketpaw/oauth/.
 # Created: 2026-02-07
 # Part of Phase 2 Integration Ecosystem
 
@@ -38,7 +38,7 @@ def _get_oauth_dir() -> Path:
 
 
 class TokenStore:
-    """File-based token store at ~/.pocketclaw/oauth/{service}.json.
+    """File-based token store at ~/.pocketpaw/oauth/{service}.json.
 
     Files are chmod 0600 (owner-only read/write).
     """

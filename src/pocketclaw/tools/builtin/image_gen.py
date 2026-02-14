@@ -72,7 +72,7 @@ class ImageGenerateTool(BaseTool):
         settings = get_settings()
 
         if not settings.google_api_key:
-            return self._error("Google API key not configured. Set POCKETCLAW_GOOGLE_API_KEY.")
+            return self._error("Google API key not configured. Set POCKETPAW_GOOGLE_API_KEY.")
 
         try:
             from google import genai

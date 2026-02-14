@@ -75,7 +75,7 @@ class UrlExtractTool(BaseTool):
         if not api_key:
             return self._error(
                 "Parallel AI API key not configured. "
-                "Set POCKETCLAW_PARALLEL_API_KEY or switch to 'local' provider."
+                "Set POCKETPAW_PARALLEL_API_KEY or switch to 'local' provider."
             )
 
         try:

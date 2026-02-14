@@ -65,9 +65,9 @@ var
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    ConfigDir := ExpandConstant('{userappdata}') + '\.pocketclaw';
-    // Use USERPROFILE for ~/.pocketclaw on Windows
-    ConfigDir := GetEnv('USERPROFILE') + '\.pocketclaw';
+    ConfigDir := ExpandConstant('{userappdata}') + '\.pocketpaw';
+    // Use USERPROFILE for ~/.pocketpaw on Windows
+    ConfigDir := GetEnv('USERPROFILE') + '\.pocketpaw';
     if DirExists(ConfigDir) then
     begin
       Res := MsgBox(

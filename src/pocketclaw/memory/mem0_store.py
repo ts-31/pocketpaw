@@ -73,7 +73,7 @@ def _build_mem0_config(
 
     Returns a dict suitable for Memory.from_config().
     """
-    data_path = data_path or (Path.home() / ".pocketclaw" / "mem0_data")
+    data_path = data_path or (Path.home() / ".pocketpaw" / "mem0_data")
 
     # --- LLM config ---
     llm_config: dict[str, Any] = {"provider": llm_provider, "config": {}}
@@ -173,7 +173,7 @@ class Mem0MemoryStore:
         self.user_id = user_id
         self.agent_id = agent_id
         self.use_inference = use_inference
-        self._data_path = data_path or (Path.home() / ".pocketclaw" / "mem0_data")
+        self._data_path = data_path or (Path.home() / ".pocketpaw" / "mem0_data")
         self._data_path.mkdir(parents=True, exist_ok=True)
 
         # Provider configuration

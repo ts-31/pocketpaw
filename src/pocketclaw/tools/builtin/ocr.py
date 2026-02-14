@@ -151,7 +151,7 @@ class OCRTool(BaseTool):
             from PIL import Image
         except ImportError:
             return self._error(
-                "No OCR provider available. Either set POCKETCLAW_OPENAI_API_KEY "
+                "No OCR provider available. Either set POCKETPAW_OPENAI_API_KEY "
                 "for GPT-4o vision, or install pytesseract: pip install 'pocketpaw[ocr]'"
             )
 

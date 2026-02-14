@@ -820,7 +820,7 @@ class Bootstrap:
 
         return (
             "Failed to install pocketpaw. "
-            "Check the log at ~/.pocketclaw/logs/launcher.log for details."
+            "Check the log at ~/.pocketpaw/logs/launcher.log for details."
         )
 
     def _get_installed_version(

@@ -3,7 +3,7 @@ SkillLoader - Load and parse skills from the AgentSkills ecosystem.
 
 Skills are loaded from:
 1. ~/.agents/skills/ - Central location (installed via `npx skills add`)
-2. ~/.pocketclaw/skills/ - PocketPaw-specific skills
+2. ~/.pocketpaw/skills/ - PocketPaw-specific skills
 
 Skills follow the AgentSkills spec: a directory with SKILL.md containing
 YAML frontmatter and markdown instructions.
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Skill search paths in priority order (later overrides earlier)
 SKILL_PATHS = [
     Path.home() / ".agents" / "skills",  # From skills.sh (central)
-    Path.home() / ".pocketclaw" / "skills",  # PocketPaw-specific
+    Path.home() / ".pocketpaw" / "skills",  # PocketPaw-specific
 ]
 
 
