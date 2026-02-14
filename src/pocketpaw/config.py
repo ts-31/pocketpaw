@@ -1,6 +1,7 @@
 """Configuration management for PocketPaw.
 
 Changes:
+  - 2026-02-14: Add migration warning for old ~/.pocketclaw/ config dir and POCKETCLAW_ env vars.
   - 2026-02-06: Secrets stored encrypted via CredentialStore; auto-migrate plaintext keys.
   - 2026-02-06: Harden file/directory permissions (700 dir, 600 files).
   - 2026-02-02: Added claude_agent_sdk to agent_backend options.
@@ -27,11 +28,44 @@ def _chmod_safe(path: Path, mode: int) -> None:
         pass
 
 
+_OLD_CONFIG_WARNING_SHOWN = False
+
+
+def _warn_old_config() -> None:
+    """Print a one-time warning if the old ~/.pocketclaw/ config dir or env vars exist."""
+    import os
+
+    global _OLD_CONFIG_WARNING_SHOWN  # noqa: PLW0603
+    if _OLD_CONFIG_WARNING_SHOWN:
+        return
+    _OLD_CONFIG_WARNING_SHOWN = True
+
+    old_dir = Path.home() / ".pocketclaw"
+    if old_dir.exists():
+        logger.warning(
+            "Found old config directory at ~/.pocketclaw/. "
+            "PocketPaw now uses ~/.pocketpaw/. "
+            "To keep your settings, run:\n"
+            "  cp -r ~/.pocketclaw/* ~/.pocketpaw/\n"
+            "Then remove the old directory when you're satisfied everything works."
+        )
+
+    # Check for old POCKETCLAW_ env vars
+    old_vars = [k for k in os.environ if k.startswith("POCKETCLAW_")]
+    if old_vars:
+        logger.warning(
+            "Found old POCKETCLAW_* environment variables: %s. "
+            "Rename them to POCKETPAW_* (e.g. POCKETPAW_ANTHROPIC_API_KEY).",
+            ", ".join(old_vars),
+        )
+
+
 def get_config_dir() -> Path:
     """Get the config directory, creating if needed."""
     config_dir = Path.home() / ".pocketpaw"
     config_dir.mkdir(exist_ok=True)
     _chmod_safe(config_dir, 0o700)
+    _warn_old_config()
     return config_dir
 
 
