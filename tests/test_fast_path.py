@@ -6,7 +6,6 @@ Covers:
 - Stop flag respected mid-stream
 - Consecutive role merging
 - Dispatch: SIMPLE -> fast path, MODERATE -> standard, routing disabled -> standard
-- Prompt trimming: SIMPLE skips _TOOL_INSTRUCTIONS
 - Persistent ClaudeSDKClient reuse, reconnection, fallback, cleanup
 """
 
@@ -365,8 +364,8 @@ async def test_chat_standard_path_when_routing_disabled():
     assert any(e.type == "done" for e in events)
 
 
-async def test_simple_prompt_excludes_tool_instructions():
-    """For SIMPLE messages, the fast-path prompt should NOT include _TOOL_INSTRUCTIONS."""
+async def test_fast_chat_prompt_passes_identity():
+    """_fast_chat should pass the identity system prompt to the API."""
     sdk = _make_sdk()
 
     captured_system = []
@@ -392,10 +391,7 @@ async def test_simple_prompt_excludes_tool_instructions():
             events.append(ev)
 
     assert len(captured_system) == 1
-    # The system prompt should be the identity only, NOT the full tool instructions
     assert "You are PocketPaw." in captured_system[0]
-    assert "## Built-in SDK Tools" not in captured_system[0]
-    assert "gmail_search" not in captured_system[0]
 
 
 # ---------------------------------------------------------------------------

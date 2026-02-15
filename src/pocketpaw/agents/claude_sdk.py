@@ -703,12 +703,10 @@ class ClaudeAgentSDK:
                 return
 
             # Compose final system prompt: identity/memory + tool docs
-            # Skip tool instructions for SIMPLE messages (saves ~3KB of tokens)
+            # Always include tool instructions — even SIMPLE messages may need tools
+            # (e.g., "remind me to call mom" is short but requires scheduler access)
             identity = system_prompt or _DEFAULT_IDENTITY
-            if is_simple:
-                final_prompt = identity
-            else:
-                final_prompt = identity + "\n" + _TOOL_INSTRUCTIONS
+            final_prompt = identity + "\n" + _TOOL_INSTRUCTIONS
 
             # Inject session history into system prompt (SDK query() takes a single string)
             if history:
