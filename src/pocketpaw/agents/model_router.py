@@ -45,9 +45,6 @@ _SIMPLE_PATTERNS: list[re.Pattern] = [
     ]
 ]
 
-# Max word count to still qualify as a short/simple message
-_SHORT_WORD_LIMIT = 5
-
 _COMPLEX_SIGNALS: list[re.Pattern] = [
     re.compile(p, re.IGNORECASE)
     for p in [
@@ -86,7 +83,14 @@ class ModelRouter:
         """
         message = message.strip()
         msg_len = len(message)
-        word_count = len(message.split())
+
+        # Empty / whitespace-only → trivially simple
+        if msg_len == 0:
+            return ModelSelection(
+                complexity=TaskComplexity.SIMPLE,
+                model=self.settings.model_tier_simple,
+                reason="Empty message",
+            )
 
         # Check complex signals first (so short technical messages stay complex)
         complex_hits = sum(1 for p in _COMPLEX_SIGNALS if p.search(message))
@@ -115,16 +119,6 @@ class ModelRouter:
                         model=self.settings.model_tier_simple,
                         reason="Short message with simple pattern",
                     )
-
-        # Token-count heuristic: short messages (≤5 words, ≤30 chars)
-        # with no complex signals are likely simple — works for any language
-        if msg_len <= _SHORT_THRESHOLD and word_count <= _SHORT_WORD_LIMIT:
-            if complex_hits == 0:
-                return ModelSelection(
-                    complexity=TaskComplexity.SIMPLE,
-                    model=self.settings.model_tier_simple,
-                    reason=f"Short message ({word_count} words, {msg_len} chars)",
-                )
 
         # Default: moderate
         return ModelSelection(
