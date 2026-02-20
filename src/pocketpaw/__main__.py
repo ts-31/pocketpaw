@@ -57,6 +57,7 @@ def main() -> None:
         epilog="""
 Examples:
   pocketpaw                          Start web dashboard (default)
+  pocketpaw serve                    Start API-only server (no dashboard)
   pocketpaw --telegram               Start in Telegram-only mode
   pocketpaw --discord                Start headless Discord bot
   pocketpaw --slack                  Start headless Slack bot (Socket Mode)
@@ -149,6 +150,12 @@ Examples:
         action="version",
         version=f"%(prog)s {get_version('pocketpaw')}",
     )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default=None,
+        help="Subcommand: 'serve' starts an API-only server (no dashboard UI)",
+    )
 
     args = parser.parse_args()
 
@@ -216,7 +223,11 @@ Examples:
     )
 
     try:
-        if args.check_ollama:
+        if args.command == "serve":
+            from pocketpaw.api.serve import run_api_server
+
+            run_api_server(host=host, port=args.port, dev=args.dev)
+        elif args.check_ollama:
             exit_code = asyncio.run(check_ollama(settings))
             raise SystemExit(exit_code)
         elif args.check_openai_compatible:

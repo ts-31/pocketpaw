@@ -345,6 +345,14 @@ class Settings(BaseSettings):
     session_token_ttl_hours: int = Field(
         default=24, description="TTL in hours for HMAC session tokens issued via /api/auth/session"
     )
+    api_cors_allowed_origins: list[str] = Field(
+        default_factory=list,
+        description="Additional CORS origins for external clients (e.g. tauri://localhost)",
+    )
+    api_rate_limit_per_key: int = Field(
+        default=60,
+        description="Max requests per minute per API key (token-bucket capacity)",
+    )
     file_jail_path: Path = Field(
         default_factory=Path.home, description="Root path for file operations"
     )
